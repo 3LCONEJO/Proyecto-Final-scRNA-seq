@@ -1,0 +1,202 @@
+{
+  "stations": {
+    "1": {
+      "line": "Práctica 1 · Control de calidad y normalización de los datos",
+      "title": "Juntar archivos del donador",
+      "text": "Se separan los archivos de cada donador para no mezclar muestras. Es el punto de partida: primero acomodar, luego convertir y recién después analizar.",
+      "input": "donador1.mtx, donador1.barcodes.tsv, donador1.features.tsv",
+      "command": "Organizar los archivos de cada muestra en una carpeta propia.",
+      "output": "Carpeta ordenada por donador",
+      "why": "Para tener cada muestra bien separada desde el inicio.",
+      "example": "Entrada: donador1.mtx → salida: carpeta de donador1 → después: convertir todo a .h5."
+    },
+    "2": {
+      "line": "Práctica 1 · Control de calidad y normalización de los datos",
+      "title": "Convertir a un archivo más cómodo de usar",
+      "text": "Se pasa todo a un formato que abre rápido y evita perderse entre archivos sueltos, como cambiar hojas sueltas por una carpeta con broche.",
+      "input": "donador1.mtx + donador1.barcodes.tsv + donador1.features.tsv",
+      "command": "Seurat::Read10X() + rhdf5::h5write()",
+      "output": "donador1.h5",
+      "why": "Para guardar la muestra en un formato más limpio y fácil de mover.",
+      "example": "Entrada: matriz cruda → salida: donador1.h5 → después: listo para cargar en Seurat."
+    },
+    "3": {
+      "line": "Práctica 1 · Control de calidad y normalización de los datos",
+      "title": "Cargar la muestra en Seurat",
+      "text": "Es como abrir la carpeta y ver si las piezas están completas antes de seguir. Aquí todavía no comparamos muestras; solo revisamos si esta muestra está bien.",
+      "input": "donador1.h5",
+      "command": "CreateSeuratObject() Hace un objeto seurat con la información del donador, listo para analizar.",
+      "output": "Objeto Seurat de donador1",
+      "why": "Para tener la muestra lista para revisar calidad, sin mezclarla todavía con las demás.",
+      "example": "Entrada: donador1.h5 → salida: objeto Seurat → después: revisar calidad."
+    },
+    "4": {
+      "line": "Práctica 1 · Control de calidad y normalización de los datos",
+      "title": "Calcular metricas de calidad",
+      "text": "Vemos la cantidad de genes por célula, la cantidad de moléculas y el porcentaje de genes mitocondriales, ribosomales, de hemoglobina y plaquetas. Es como ver que tan bien salieron las celulas antes de seguir, para no perder tiempo con datos malos.",
+      "input": "Objeto Seurat de donador1",
+      "command": "PercentageFeatureSet('MT-','RP','HB','Marcadores de Plaquetas') + VlnPlot() + FeatureScatter()",
+      "output": "Objeto Seurat con métricas de calidad + gráficas de control",
+      "why": "Para poder filtrar las células que no cumplen con los estándares de calidad y evitar que el ruido engañe el análisis.",
+      "example": "Entrada: objeto Seurat → salida: métricas de calidad → después: filtrar células malas."
+    },
+    "5": {
+      "line": "Práctica 1 · Control de calidad y normalización de los datos",
+      "title": "Quitar lo que estorba",
+      "text": "Se eliminan células raras, vacías o duplicadas para quedarse con lo que realmente cuenta.",
+      "input": "Objeto Seurat con métricas de calidad de donador1",
+      "command": "PercentageFeatureSet() + filtros de calidad",
+      "output": "Objeto Seurat con células buenas",
+      "why": "Para evitar que el ruido engañe el análisis.",
+      "example": "Entrada: objeto Seurat con métricas de calidad → salida: células buenas → después: normalizar."
+    },
+    "6": {
+      "line": "Práctica 1 · Control de calidad y normalización de los datos",
+      "title": "Ordenar la muestra para que todas hablen el mismo idioma",
+      "text": "Se estandariza la información para que comparar donadores no sea injusto por diferencias técnicas.",
+      "input": "Objeto Seurat filtrado con células buenas",
+      "command": "SCTransform()",
+      "output": "Datos normalizados + genes variables",
+      "why": "Para que todas las células se puedan comparar en igualdad de condiciones.",
+      "example": "Entrada: datos limpios → salida: normalizados → después: integrar con otras muestras."
+    },
+    "7": {
+      "line": "Práctica 2 · Reducción de dimensiones e integración de datos",
+      "title": "Ver la naturaleza de los datos y buscar grupos de células parecidas",
+      "text": "Como si en el metro juntáramos estaciones que reciben pasajeros con hábitos parecidos, aquí se forman grupos con células semejantes.",
+      "input": "Datos normalizados y genes variables de donadores integrados",
+      "command": "VariableFeatures() +RunPCA() + RunUMAP() + FindNeighbors() + FindClusters()",
+      "output": "Mapa con grupos de células similares",
+      "why": "Para ver qué tipos de células están cerca entre sí.",
+      "example": "Entrada: datos normalizados → salida: mapa con grupos → después: integrar."
+    },
+    "8": {
+      "line": "Práctica 2 · Reducción de dimensiones e integración de datos",
+      "title": "Juntar las muestras sin borrar lo importante",
+      "text": "A veces, nuestras muestras vienen de diferentes laboratorios o técnicas, pero queremos compararlas igual. Lo que hacemos es detectar esas diferencias técnicas y corregirlas para que no nos confundan, como si en el metro ajustáramos las estaciones para que todas tengan el mismo diseño, sin importar quién las construyó.",
+      "input": "Objetos Seurat de todos los donadores",
+      "command": "harmony::RunHarmony() o IntegrateLayers()",
+      "output": "Datos integrados y comparables",
+      "why": "Para ver diferencias biológicas, no diferencias de máquina o lote.",
+      "example": "Entrada: mapa con grupos dispersos → salida: grupos integrados → después: anotar qué tipo de célula es cada uno."
+    },
+    "9": {
+      "line": "Práctica 3 · Biomarcadores y anotación de los tipos celulares",
+      "title": "Ponerle nombre a cada grupo",
+      "text": "Se buscan genes que actúan como letreros. Con eso se sabe si un grupo se parece más a una neurona, microglía o astrocito.",
+      "input": "Clusters sin nombre, sin dueño, sin destino...",
+      "command": "FindAllMarkers()",
+      "output": "Tabla de marcadores por grupo",
+      "why": "Para saber qué tipo de célula es cada grupo.",
+      "example": "Entrada: clusters sin nombre → salida: marcadores para anotar → después: comparar grupos con más detalle."
+    },
+    "10": {
+      "line": "Práctica 3 · Biomarcadores y anotación de los tipos celulares",
+      "title": "Ver qué genes separan mejor a cada grupo",
+      "text": "Se compara qué genes aparecen más en cada cluster para distinguirlos con claridad. Y utilizando una herramienta etiquetamos cada celula con el tipo que le corresponde, para que después podamos comparar entre condiciones sin perder de vista qué tipo de célula es cada una.",
+      "input": "Tabla de marcadores",
+      "command": "DotPlot() + DoHeatmap() + FeaturePlot() + SingleR::SingleR() + celldex::celldex()",
+      "output": "Gráficas fáciles de leer y Grupos anotados con tipos celulares",
+      "why": "Para explicar con imágenes qué hace diferente a cada grupo. Así se puede comparar entre condiciones sin perder de vista qué tipo de célula es cada una.",
+      "example": "Entrada: tabla de marcadores → salida: clusters con nombres, → después: comparar condiciones."
+    },
+    "11": {
+      "line": "Práctica 4 · Expresión diferencial por condiciones",
+      "title": "Control del ciclo celular",
+      "text": "Se identifican las fases del ciclo celular de las células mediante genes marcadores de proliferación (fases S y G2/M). Esto permite evaluar si la variabilidad observada está influenciada por proliferación celular y decidir si debe corregirse antes del análisis de expresión diferencial.",
+      "input": "Objeto Seurat anotado + listas de genes de ciclo celular",
+      "command": "CellCycleScoring() + VlnPlot() + FeaturePlot() + DimPlot()",
+      "output": "Scores S.Score y G2M.Score, fase celular asignada y visualización del efecto del ciclo celular",
+      "why": "Esto se hace para detectar si el ciclo celular introduce sesgos en el clustering, reducción de dimensiones o expresión diferencial. Si domina la variabilidad, puede corregirse mediante regresión usando ScaleData(vars.to.regress = c('S.Score','G2M.Score')).",
+      "example": "Entrada: objeto anotado + genes de ciclo celular → salida: scores y fases celulares → después: decidir si corregir el efecto del ciclo celular antes de FindMarkers()."
+    },
+    "12": {
+      "line": "Práctica 4 · Expresión diferencial por condiciones",
+      "title": "Comparar Control, Alzheimer y Parkinson",
+      "text": "Se mira dónde cambian más las células entre condiciones, como comparar tres recorridos parecidos para descubrir el desvío.",
+      "input": "Grupos anotados + condición",
+      "command": "FindMarkers()",
+      "output": "Genes que suben, genes que bajan, tabla final",
+      "why": "Para saber qué cambia en cada enfermedad.",
+      "example": "Entrada: grupos anotados + condición → salida: genes diferenciales → después: preparar enriquecimiento."
+    },
+    "13": {
+      "line": "Práctica 4 · Expresión diferencial por condiciones",
+      "title": "Pseudobulk con matriz de expresión promedio por grupo",
+      "text": "Dado que ya tenemos nuestros grupos anotados, se calcula la expresión promedio de cada gen en cada grupo para comparar entre condiciones. Esto es como sacar un resumen de cada estación para ver qué cambios hay sin perderse en los detalles de cada célula.",
+      "input": "Tabla de expresión por celula + grupos anotados",
+      "command": "sparse.model.matrix() + edgeR::glmQLFit() + edgeR::glmQLFTest()",
+      "output": "Tabla final con genes diferenciales por grupo y condición",
+      "why": "Verificamos que los datos tengan validez biológica y que los cambios sean claros antes de hacer el enriquecimiento. Es como revisar que el resumen de cada estación tenga sentido antes de sacar conclusiones.",
+      "example": "Entrada: tabla de expresión → salida: tabla final → después: Interpretar resultados con enriquecimiento GO/KEGG."
+    },
+    "14": {
+      "line": "Práctica 4 · Expresión diferencial por condiciones",
+      "title": "Dejar lista la información para interpretarla",
+      "text": "La salida se ordena para pasar a la parte final del proyecto: qué procesos están más activos y qué funciones cambian.",
+      "input": "Lista de genes diferenciales",
+      "command": "Ordenar resultados para GO/KEGG.",
+      "output": "Archivo listo para enriquecimiento GO/KEGG",
+      "why": "Para convertir la lista de genes en una explicación biológica.",
+      "example": "Entrada: genes diferenciales → salida: archivo listo → después: pseudobulk."
+    },
+    "15": {
+      "line": "Práctica 4 · Expresión diferencial por condiciones",
+      "title": "Figuras para contar la historia",
+      "text": "Se hacen gráficas claras para mostrar los cambios sin necesidad de leer toda la tabla.",
+      "input": "Resultados comparativos",
+      "command": "UMAP, heatmap y volcano.",
+      "output": "UMAP, heatmap, volcano",
+      "why": "Para presentar el hallazgo de forma visual.",
+      "example": "Entrada: resultados comparativos → salida: figuras → después: conclusiones."
+    },
+    "16": {
+      "line": "Práctica 4 · Expresión diferencial por condiciones",
+      "title": "Salida final",
+      "text": "Con todo ordenado, ya se puede interpretar qué procesos cambian y redactar conclusiones.",
+      "input": "Genes priorizados + tablas + figuras",
+      "command": "Enriquecimiento GO/KEGG y síntesis final.",
+      "output": "Enriquecimiento GO/KEGG + conclusiones",
+      "why": "Para pasar de datos a una explicación biológica sencilla.",
+      "example": "Entrada: todo el análisis → salida: interpretación final → después: informe o presentación."
+    }
+  },
+  "pipelineConfig": {
+    "nodes": [
+      { "id": 1, "x": 120, "y": 170, "label": "Juntar archivos del donador", "group": "practica1", "dot": "blue", "next": [2] },
+      { "id": 2, "x": 320, "y": 170, "label": "Convertir a .h5", "group": "practica1", "dot": "blue", "next": [3] },
+      { "id": 3, "x": 520, "y": 170, "label": "Cargar en Seurat", "group": "practica1", "dot": "blue", "next": [4] },
+      { "id": 4, "x": 720, "y": 170, "label": "QC", "group": "practica1", "dot": "blue", "next": [5] },
+      { "id": 5, "x": 920, "y": 170, "label": "Filtrar ruido", "group": "practica1", "dot": "blue", "next": [6] },
+      { "id": 6, "x": 1120, "y": 170, "label": "Normalizar", "group": "practica1", "dot": "blue", "next": [7] },
+      { "id": 7, "x": 920, "y": 330, "label": "Integrar muestras", "group": "practica2", "dot": "green", "next": [8] },
+      { "id": 8, "x": 720, "y": 330, "label": "Encontrar grupos", "group": "practica2", "dot": "green", "next": [9, 13] },
+      { "id": 9, "x": 520, "y": 490, "label": "Poner nombre a grupos", "group": "practica3", "dot": "amber", "next": [10] },
+      { "id": 10, "x": 320, "y": 490, "label": "Ver marcadores", "group": "practica3", "dot": "amber", "next": [11] },
+      { "id": 11, "x": 120, "y": 650, "label": "Comparar condiciones", "group": "practica4", "dot": "red", "next": [12] },
+      { "id": 12, "x": 320, "y": 650, "label": "Dejar lista la salida", "group": "practica4", "dot": "red", "next": [13] },
+      { "id": 13, "x": 520, "y": 650, "label": "Resumen visual", "group": "practica4", "dot": "red", "next": [14] },
+      { "id": 14, "x": 720, "y": 650, "label": "Tabla final", "group": "practica4", "dot": "red", "next": [15] },
+      { "id": 15, "x": 920, "y": 650, "label": "Figuras", "group": "practica4", "dot": "red", "next": [16] },
+      { "id": 16, "x": 1120, "y": 650, "label": "Salida final", "group": "practica4", "dot": "red", "next": [] }
+    ],
+    "connections": [
+      { "from": 1, "to": 2, "kind": "main" },
+      { "from": 2, "to": 3, "kind": "main" },
+      { "from": 3, "to": 4, "kind": "main" },
+      { "from": 4, "to": 5, "kind": "main" },
+      { "from": 5, "to": 6, "kind": "main" },
+      { "from": 6, "to": 7, "kind": "main" },
+      { "from": 7, "to": 8, "kind": "main" },
+      { "from": 8, "to": 9, "kind": "main" },
+      { "from": 8, "to": 13, "kind": "branch" },
+      { "from": 9, "to": 10, "kind": "main" },
+      { "from": 10, "to": 11, "kind": "main" },
+      { "from": 11, "to": 12, "kind": "main" },
+      { "from": 12, "to": 13, "kind": "main" },
+      { "from": 13, "to": 14, "kind": "main" },
+      { "from": 14, "to": 15, "kind": "main" },
+      { "from": 15, "to": 16, "kind": "main" }
+    ]
+  }
+}

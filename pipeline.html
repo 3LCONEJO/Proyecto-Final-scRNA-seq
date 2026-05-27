@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scRNA-seq Pipeline · Terminal View</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* ── base backgrounds: deep purple-black ── */
+      --bg:      #080810;
+      --bg2:     #0b0b16;
+      --panel:   #0e0e1a;
+      --panel2:  #090913;
+      /* ── borders: purple tint ── */
+      --border:  #1e1a30;
+      --border2: #2a2448;
+      /* ── primary accent: electric green (terminal) ── */
+      --green:   #39ff72;
+      --green2:  #22cc55;
+      --green3:  #0d3a20;
+      --accent:  #ff4d8d;
+      --accent2: #e83f7a;
+      --accent3: #3a1023;
+      /* ── secondary accent: vivid blue ── */
+      --blue:    #00bfff;
+      --cyan:    #7ee8ff;
+      /* ── tertiary accent: purple ── */
+      --purple:  #c084fc;
+      --purple2: #a855f7;
+      --purple3: #3b1f6b;
+      /* ── legacy slots kept for node labels ── */
+      --amber:   #ffd166;
+      --red:     #ff4d6d;
+      /* ── neutrals: purple-shifted ── */
+      --dim:     #3a3450;
+      --muted:   #6a5f8a;
+      --text:    #c4b8e0;
+      --bright:  #ede8ff;
+      --mono:    'JetBrains Mono', 'Share Tech Mono', monospace;
+      --scanline: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.07) 2px,
+        rgba(0,0,0,0.07) 4px
+      );
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+
+    body {
+      font-family: var(--mono);
+      color: var(--text);
+      background: var(--bg);
+      background-image:
+        var(--scanline),
+        radial-gradient(ellipse at 20% 0%, rgba(168,85,247,0.07) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 100%, rgba(0,191,255,0.05) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(57,255,114,0.02) 0%, transparent 60%);
+      min-height: 100vh;
+    }
+
+    /* ── SCANLINE OVERLAY ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: var(--scanline);
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.4;
+    }
+
+    /* ── CURSOR BLINK ── */
+    @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+    @keyframes glow-pulse { 0%,100%{text-shadow:0 0 6px var(--accent)} 50%{text-shadow:0 0 20px var(--accent),0 0 40px rgba(168,85,247,0.5)} }
+    @keyframes flicker { 0%{opacity:1}92%{opacity:1}93%{opacity:.85}94%{opacity:1}97%{opacity:.92}100%{opacity:1} }
+    @keyframes scandown { 0%{transform:translateY(-100%)} 100%{transform:translateY(100vh)} }
+    @keyframes typewriter { from{width:0} to{width:100%} }
+    @keyframes data-stream { 0%{opacity:0.3} 50%{opacity:1} 100%{opacity:0.3} }
+
+    .page {
+      max-width: 1900px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    /* ── WINDOW CHROME ── */
+    .win {
+      border: 1px solid var(--border2);
+      background: var(--panel);
+      position: relative;
+    }
+    .win::before {
+      content: attr(data-label);
+      display: block;
+      padding: 5px 12px;
+      background: var(--border);
+      border-bottom: 1px solid var(--border2);
+      color: var(--muted);
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .win-body { padding: 14px 16px; }
+
+    /* ── HERO ── */
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .hero-main .win-body {
+      padding: 20px 22px;
+    }
+
+    .prompt-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .prompt-user { color: var(--accent); font-weight: 700; }
+    .prompt-host { color: var(--blue); }
+    .prompt-path { color: var(--amber); }
+    .prompt-sym  { color: var(--accent); }
+
+    h1 {
+      font-size: clamp(1.6rem, 3.5vw, 3.4rem);
+      font-weight: 800;
+      line-height: 1.0;
+      color: var(--accent);
+      letter-spacing: -0.03em;
+      animation: glow-pulse 3.5s ease-in-out infinite;
+      margin-bottom: 6px;
+    }
+
+    .h1-sub {
+      font-size: 0.85rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .h1-sub span { color: var(--purple); }
+
+    .subtitle {
+      font-size: 0.88rem;
+      color: var(--text);
+      line-height: 1.75;
+      max-width: 80ch;
+      border-left: 2px solid var(--purple3);
+      padding-left: 14px;
+      margin-bottom: 16px;
+    }
+
+    .meta-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .meta {
+      padding: 4px 10px;
+      border: 1px solid var(--border2);
+      font-size: 0.72rem;
+      color: var(--purple);
+      letter-spacing: 0.08em;
+      background: rgba(168,85,247,0.06);
+    }
+    .meta::before { content: '# '; color: var(--muted); }
+
+    /* ── LEGEND ── */
+    .legend-grid { display: grid; gap: 8px; }
+
+    .legend-item {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 8px;
+      align-items: start;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      font-size: 0.78rem;
+    }
+
+    .legend-sq {
+      width: 16px;
+      height: 16px;
+      border: 2px solid;
+      margin-top: 1px;
+      position: relative;
+    }
+    .legend-sq::after {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      opacity: 0.4;
+    }
+    .legend-sq.blue   { border-color: var(--blue);  } .legend-sq.blue::after  { background: var(--blue);  }
+    .legend-sq.green  { border-color: var(--green); } .legend-sq.green::after { background: var(--green); }
+    .legend-sq.amber  { border-color: var(--amber); } .legend-sq.amber::after { background: var(--amber); }
+    .legend-sq.red    { border-color: var(--red);   } .legend-sq.red::after   { background: var(--red);   }
+
+    .legend-item strong { color: var(--bright); display: block; margin-bottom: 2px; }
+    .legend-item span   { color: var(--muted); line-height: 1.4; }
+
+    /* ── WORKSPACE ── */
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) 420px;
+      gap: 12px;
+      align-items: start;
+    }
+
+    /* ── MAP PANEL ── */
+    .map-panel { position: relative; }
+    .map-panel .win-body { padding: 12px; }
+
+    .map-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .map-title {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .map-title::before { content: '$ '; color: var(--accent); }
+
+    .map-note {
+      font-size: 0.73rem;
+      color: var(--dim);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .map-note::before { content: '// '; color: var(--muted); }
+
+    .pan-bar {
+      display: grid;
+      grid-template-columns: 140px 1fr 64px;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      font-size: 0.7rem;
+    }
+    .pan-bar label { color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+    .pan-bar label::before { content: '--'; color: var(--dim); margin-right: 4px; }
+    .pan-bar input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+      background: transparent;
+    }
+    .pan-value { color: var(--accent); text-align: right; font-size: 0.72rem; }
+
+    .map-stage {
+      width: 100%;
+      min-height: 900px;
+      border: 1px solid var(--border);
+      background:
+        repeating-linear-gradient(90deg, transparent 0 39px, rgba(168,85,247,0.04) 39px 40px),
+        repeating-linear-gradient(0deg,  transparent 0 39px, rgba(168,85,247,0.04) 39px 40px),
+        var(--panel2);
+      position: relative;
+      overflow: hidden;
+      cursor: grab;
+    }
+
+    /* scan line sweep */
+    .map-stage::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(126,232,255,0.12), rgba(192,132,252,0.08), transparent);
+      animation: scandown 6s linear infinite;
+      pointer-events: none;
+    }
+
+    .map-canvas {
+      position: absolute;
+      inset: 0;
+      width: 1800px;
+      height: 900px;
+      transform: translateX(var(--pan-x, 0px));
+      transform-origin: top left;
+      will-change: transform;
+    }
+
+    .map-stage svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .edge-path {
+      fill: none;
+      stroke-linecap: square;
+      stroke-linejoin: miter;
+      shape-rendering: crispEdges;
+    }
+
+    /* ── STATION NODE ── */
+    .station-node {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      width: 156px;
+      background: var(--panel);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      padding: 8px 10px 10px;
+      text-align: left;
+      cursor: pointer;
+      z-index: 3;
+      transition: border-color 0.12s, box-shadow 0.12s;
+      font-family: var(--mono);
+    }
+
+    .station-node::before {
+      content: attr(data-id);
+      position: absolute;
+      top: -1px; left: -1px;
+      width: 18px;
+      height: 18px;
+      background: var(--border2);
+      color: var(--muted);
+      font-size: 0.62rem;
+      display: grid;
+      place-items: center;
+    }
+
+    .station-node:hover {
+      border-color: var(--purple2);
+      box-shadow: 0 0 0 1px rgba(168,85,247,0.25), inset 0 0 20px rgba(168,85,247,0.05);
+    }
+
+    .station-node.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(255,77,141,0.35), 0 0 18px rgba(255,77,141,0.15);
+    }
+
+    .station-node.energized {
+      border-color: var(--blue);
+      box-shadow:
+        0 0 0 1px rgba(126,232,255,0.55),
+        0 0 12px rgba(126,232,255,0.3),
+        0 0 30px rgba(126,232,255,0.12),
+        inset 0 0 24px rgba(126,232,255,0.05);
+    }
+
+    .node-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+      margin-top: 4px;
+    }
+
+    .node-dot {
+      width: 10px;
+      height: 10px;
+      border: 2px solid;
+      flex: none;
+      position: relative;
+    }
+    .node-dot::after {
+      content: '';
+      position: absolute;
+      inset: 1px;
+      opacity: 0.6;
+    }
+    .node-dot.blue  { border-color: var(--blue);  } .node-dot.blue::after  { background: var(--blue);  }
+    .node-dot.green { border-color: var(--green); } .node-dot.green::after { background: var(--green); }
+    .node-dot.amber { border-color: var(--amber); } .node-dot.amber::after { background: var(--amber); }
+    .node-dot.red   { border-color: var(--red);   } .node-dot.red::after   { background: var(--red);   }
+
+    .node-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--bright);
+      line-height: 1.25;
+      display: block;
+    }
+
+    .node-mini {
+      font-size: 0.64rem;
+      color: var(--dim);
+      letter-spacing: 0.04em;
+    }
+    .node-mini::before { content: '→ '; color: var(--muted); }
+
+    .focus-orb {
+      pointer-events: none;
+      filter: drop-shadow(0 0 6px rgba(126,232,255,0.9)) drop-shadow(0 0 16px rgba(126,232,255,0.5));
+    }
+
+    /* ── STATION PANEL ── */
+    .station-panel .win-body {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .station-kicker {
+      font-size: 0.67rem;
+      color: var(--muted);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
+    }
+    .station-kicker::before { content: '$ cat '; color: var(--accent); }
+
+    .station-title {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    .station-text {
+      font-size: 0.8rem;
+      color: var(--text);
+      line-height: 1.7;
+      border-left: 2px solid rgba(0,191,255,0.25);
+      padding-left: 12px;
+    }
+
+    /* ── IO BOXES ── */
+    .io-box {
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      padding: 8px 12px;
+    }
+
+    .io-box strong {
+      display: block;
+      font-size: 0.64rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 5px;
+    }
+
+    .io-box.input  strong::before { content: '< '; color: var(--blue);  }
+    .io-box.cmd    strong::before { content: '$ '; color: var(--accent); }
+    .io-box.output strong::before { content: '> '; color: var(--amber); }
+
+    .io-code {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: #a0d8ef;
+      line-height: 1.55;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .io-box.cmd .io-code { color: var(--accent2); }
+    .io-box.output .io-code { color: var(--amber); }
+
+    .why-box {
+      border: 1px solid rgba(0,191,255,0.2);
+      background: rgba(0,191,255,0.03);
+      padding: 8px 12px;
+    }
+    .why-box strong {
+      display: block;
+      font-size: 0.64rem;
+      color: var(--blue);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 5px;
+    }
+    .why-box strong::before { content: '# '; color: var(--muted); }
+    .why-box p { font-size: 0.8rem; color: var(--text); line-height: 1.6; }
+
+    .example-box {
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      padding: 8px 12px;
+    }
+    .example-box strong {
+      display: block;
+      font-size: 0.64rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 5px;
+    }
+    .example-box strong::before { content: '/* '; color: var(--dim); }
+    .example-box p { font-size: 0.78rem; color: var(--muted); line-height: 1.55; font-style: italic; }
+
+    /* ── MINI STEPS ── */
+    .steps {
+      display: grid;
+      gap: 5px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .step-mini {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      cursor: pointer;
+      color: var(--text);
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      transition: border-color 0.1s, background 0.1s;
+    }
+
+    .step-mini:hover { border-color: var(--border2); background: rgba(168,85,247,0.04); }
+    .step-mini.active {
+      border-color: var(--blue);
+      background: rgba(168,85,247,0.08);
+    }
+    .step-mini.active .mini-num { background: var(--cyan); color: #000; }
+
+    .mini-num {
+      width: 20px;
+      height: 20px;
+      display: grid;
+      place-items: center;
+      background: var(--border);
+      font-size: 0.68rem;
+      font-weight: 800;
+      flex: none;
+      font-family: var(--mono);
+      color: var(--muted);
+    }
+
+    .step-mini span:last-child {
+      display: block;
+      color: var(--muted);
+      font-size: 0.7rem;
+      margin-top: 1px;
+      line-height: 1.3;
+    }
+
+    /* ── BOTTOM ── */
+    .bottom {
+      display: grid;
+      grid-template-columns: 1.3fr 0.7fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .card-body { padding: 14px 16px; font-size: 0.82rem; line-height: 1.7; color: var(--text); }
+    .card-body h3 {
+      font-size: 0.72rem;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 10px;
+    }
+    .card-body h3::before { content: '$ '; }
+    .card-body p { color: var(--muted); }
+    .footer-note {
+      margin-top: 10px;
+      font-size: 0.74rem;
+      color: var(--dim);
+      border-left: 2px solid var(--border2);
+      padding-left: 10px;
+    }
+
+    .print-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 8px 16px;
+      border: 1px solid var(--purple2);
+      background: rgba(168,85,247,0.08);
+      color: var(--purple);
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+      transition: background 0.12s;
+    }
+    .print-btn::before { content: '$ '; color: var(--muted); }
+    .print-btn:hover { background: rgba(168,85,247,0.15); }
+
+    .blueprint {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      padding: 10px 12px;
+      font-size: 0.76rem;
+    }
+    .blueprint h4 {
+      font-size: 0.64rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 6px;
+    }
+    .blueprint h4::before { content: '# '; color: var(--dim); }
+    .blueprint p { color: var(--muted); line-height: 1.55; }
+    .blueprint strong { color: var(--blue); }
+
+    /* ── STATUS BAR ── */
+    .statusbar {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      padding: 5px 12px;
+      background: var(--accent);
+      color: #000;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .statusbar-item { opacity: 0.7; }
+    .statusbar-item.hl { opacity: 1; }
+    .statusbar-sep { color: rgba(0,0,0,0.3); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 1450px) {
+      .hero, .workspace, .bottom { grid-template-columns: 1fr; }
+      .map-stage { min-height: 820px; }
+    }
+    @media (max-width: 920px) {
+      .map-stage { min-height: 1180px; }
+      .station-node { width: 130px; }
+      .station-title { font-size: 1rem; }
+    }
+
+    @media print {
+      .pan-bar, .print-btn { display: none; }
+      .map-stage { min-height: 900px; overflow: visible; }
+      body::before { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+
+    <!-- STATUS BAR -->
+    <div class="statusbar">
+      <span class="statusbar-item hl">NORMAL</span>
+      <span class="statusbar-sep">│</span>
+      <span class="statusbar-item">scRNA-seq pipeline</span>
+      <span class="statusbar-sep">│</span>
+      <span class="statusbar-item">15 pasos</span>
+      <span class="statusbar-sep">│</span>
+      <span class="statusbar-item">Seurat · Harmony · UMAP</span>
+      <span class="statusbar-sep">│</span>
+      <span class="statusbar-item">Control · Alzheimer · Parkinson</span>
+      <span class="statusbar-sep" style="margin-left:auto">│</span>
+      <span class="statusbar-item hl" id="statusClock">--:--:--</span>
+    </div>
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="win" data-label="~/scrna-seq/pipeline.sh · bash · 148×42">
+        <div class="win-body">
+          <div class="prompt-line">
+            <span class="prompt-user">codos@lab</span><span class="prompt-sym">:</span><span class="prompt-path">~/scrna-seq/</span><span class="prompt-sym">$</span>
+            <span style="color:var(--bright)">cat README.md</span>
+          </div>
+          <h1>scRNA-seq<br>Pipeline</h1>
+          <div class="h1-sub">single-cell transcriptomics · <span>Ruta de análisis completo</span></div>
+          <p class="subtitle">
+            Infografia Interactiva acerca del pipeline de análisis de scRNA-seq<br>
+            Esta infografía traza el recorrido desde los archivos crudos del secuenciador hasta los genes diferenciales entre Control, Alzheimer y Parkinson.
+            Haz clic en cualquier nodo para ver qué entra, qué sale y por qué.
+          </p>
+          <div class="meta-row">
+            <div class="meta">12 muestras</div>
+            <div class="meta">Seurat · Harmony · UMAP</div>
+            <div class="meta">GO/KEGG output</div>
+            <div class="meta">15 pasos</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="win" data-label="legend.conf · lectura visual">
+        <div class="win-body">
+          <div style="font-size:0.67rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:10px;">
+            <span style="color:var(--accent)">$</span> grep -E 'LINE|PHASE' legend.conf
+          </div>
+          <div class="legend-grid">
+            <div class="legend-item">
+              <div class="legend-sq blue"></div>
+              <div><strong>CONTROL DE CALIDAD</strong><span>Archivos, carga, calidad y normalización.</span></div>
+            </div>
+            <div class="legend-item">
+              <div class="legend-sq green"></div>
+              <div><strong>REDUCCION E INTEGRACION</strong><span>Reducción de dimensiones e integración.</span></div>
+            </div>
+            <div class="legend-item">
+              <div class="legend-sq amber"></div>
+              <div><strong>IDENTIDAD</strong><span>Anotación de clusters y marcadores celulares</span></div>
+            </div>
+            <div class="legend-item">
+              <div class="legend-sq red"></div>
+              <div><strong>EXPRESION DIFERENCIAL</strong><span>Expresión diferencial y salida final.</span></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- WORKSPACE -->
+    <section class="workspace">
+      <section class="win map-panel" data-label="pipeline.graph · nodos interactivos · haz clic para explorar">
+        <div class="win-body">
+          <div class="map-head">
+            <div>
+              <div class="map-title">pipeline --graph --interactive</div>
+              <div class="map-note">Haz clic en cualquier estación. El panel derecho mostrará stdin, stdout, comando y por qué.</div>
+            </div>
+          </div>
+
+          <div class="pan-bar">
+            <label for="mapPan">pan-x</label>
+            <input id="mapPan" type="range" min="0" max="100" value="0" />
+            <div class="pan-value" id="panValue">0%</div>
+          </div>
+
+          <div class="map-stage" id="mapStage">
+            <div id="mapCanvas" class="map-canvas"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="win station-panel" id="stationPanel" data-label="node.info · detalle de estación">
+        <div class="win-body">
+          <div class="station-kicker" id="stationLine">pipeline.log</div>
+          <h2 class="station-title" id="stationTitle">Cargando nodo...</h2>
+          <p class="station-text" id="stationText">Leyendo JSON externo...</p>
+
+          <div class="io-box input">
+            <strong>stdin</strong>
+            <div class="io-code" id="stationInput">...</div>
+          </div>
+
+          <div class="io-box cmd">
+            <strong>comando</strong>
+            <div class="io-code" id="stationCommand">...</div>
+          </div>
+
+          <div class="io-box output">
+            <strong>stdout</strong>
+            <div class="io-code" id="stationOutput">...</div>
+          </div>
+
+          <div class="why-box">
+            <strong>por qué</strong>
+            <p id="stationWhy">...</p>
+          </div>
+
+          <div class="example-box">
+            <strong>ejemplo */</strong>
+            <p id="stationExample">...</p>
+          </div>
+
+          <div class="steps" id="miniSteps"></div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- BOTTOM -->
+    <section class="bottom">
+      <div class="win" data-label="pipeline.md · cómo leer este análisis">
+        <div class="card-body">
+          <h3>echo "cómo leer esto"</h3>
+          <p>
+            Cada nodo es un proceso del pipeline. Los nodos cuadrados, las líneas rectas y los colores de borde reflejan la fase del análisis.
+            Los comandos reales (SCTransform, RunHarmony, FindMarkers) están en cada nodo para que el flujo sea fiel a lo que corre en R.
+          </p>
+          <div class="footer-note">
+            Ruta principal: .mtx → .h5 → Seurat → QC → SCTransform → Harmony → UMAP + clusters → marcadores → DEG → GO/KEGG
+          </div>
+          <button class="print-btn" id="exportPngBtn" type="button">save pipeline.png</button>
+        </div>
+      </div>
+      <div class="win" data-label="output.log · salida final">
+        <div class="card-body">
+          <h3>echo "salida esperada"</h3>
+          <p>
+            Genes diferenciales priorizados, tablas con marcadores por cluster, mapas UMAP comparativos y figuras volcano/heatmap entre condiciones.
+          </p>
+          <div class="blueprint">
+            <h4>Fuente de datos</h4>
+            <p>La estructura editable vive en <strong>pipeline_metro_infografia_data.json</strong>. La página lo lee al cargar sin código embebido.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // ── CLOCK ──
+    function tickClock() {
+      const el = document.getElementById('statusClock');
+      if (el) el.textContent = new Date().toLocaleTimeString('es-MX', { hour12: false });
+    }
+    tickClock();
+    setInterval(tickClock, 1000);
+
+    // ── DATA ──
+    const stations = {};
+    const pipelineConfig = { nodes: [], connections: [] };
+    const dataSourceUrl = './pipeline_metro_infografia_data.json';
+
+    const stationPanel = {
+      line:    document.getElementById('stationLine'),
+      title:   document.getElementById('stationTitle'),
+      text:    document.getElementById('stationText'),
+      input:   document.getElementById('stationInput'),
+      command: document.getElementById('stationCommand'),
+      output:  document.getElementById('stationOutput'),
+      why:     document.getElementById('stationWhy'),
+      example: document.getElementById('stationExample')
+    };
+
+    const miniSteps  = document.getElementById('miniSteps');
+    const mapCanvas  = document.getElementById('mapCanvas');
+    const mapPan     = document.getElementById('mapPan');
+    const panValue   = document.getElementById('panValue');
+    const exportPngBtn = document.getElementById('exportPngBtn');
+
+    let activeStationId = 1;
+    let focusRunId      = 0;
+    let stationNodes    = [];
+    let mapSvg          = null;
+    let html2canvasLoader = null;
+
+    function cloneData(data) { return JSON.parse(JSON.stringify(data)); }
+
+    function ensureHtml2Canvas() {
+      if (window.html2canvas) return Promise.resolve(window.html2canvas);
+      if (!html2canvasLoader) {
+        html2canvasLoader = new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+          script.crossOrigin = 'anonymous';
+          script.onload = () => resolve(window.html2canvas);
+          script.onerror = () => reject(new Error('No se pudo cargar html2canvas.'));
+          document.head.appendChild(script);
+        });
+      }
+      return html2canvasLoader;
+    }
+
+    function buildViewportFilename() {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
+      return `pipeline-viewport-${stamp}.png`;
+    }
+
+    function downloadCanvasAsPng(canvas, filename) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (!blob) {
+            reject(new Error('No se pudo crear la imagen PNG.'));
+            return;
+          }
+
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          link.rel = 'noopener';
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          resolve();
+        }, 'image/png');
+      });
+    }
+
+    async function exportViewportToPng() {
+      if (!exportPngBtn || exportPngBtn.dataset.busy === 'true') return;
+      exportPngBtn.dataset.busy = 'true';
+
+      try {
+        const html2canvas = await ensureHtml2Canvas();
+        const canvas = await html2canvas(document.body, {
+          backgroundColor: getComputedStyle(document.body).backgroundColor,
+          useCORS: true,
+          allowTaint: false,
+          scale: window.devicePixelRatio || 1,
+          scrollX: -window.scrollX,
+          scrollY: -window.scrollY,
+          windowWidth: window.innerWidth,
+          windowHeight: window.innerHeight,
+          x: window.scrollX,
+          y: window.scrollY,
+          width: window.innerWidth,
+          height: window.innerHeight,
+          logging: false
+        });
+
+        await downloadCanvasAsPng(canvas, buildViewportFilename());
+      } catch (error) {
+        console.error(error);
+        window.alert('No se pudo guardar la imagen del viewport. Revisa que la librería externa cargue correctamente.');
+      } finally {
+        delete exportPngBtn.dataset.busy;
+      }
+    }
+
+    async function loadPipelineData() {
+      const response = await fetch(dataSourceUrl);
+      if (!response.ok) throw new Error(`No se pudo leer ${dataSourceUrl} (${response.status})`);
+      return response.json();
+    }
+
+    function getStationData(id) { return stations[String(id)] || {}; }
+
+    function renderStationDetails(id) {
+      const data = getStationData(id);
+      stationPanel.line.textContent    = data.line    || 'pipeline.log';
+      stationPanel.title.textContent   = data.title   || `Nodo ${id}`;
+      stationPanel.text.textContent    = data.text    || '';
+      stationPanel.input.textContent   = data.input   || '—';
+      stationPanel.command.textContent = data.command || '—';
+      stationPanel.output.textContent  = data.output  || '—';
+      stationPanel.why.textContent     = data.why     || '';
+      stationPanel.example.textContent = data.example || '';
+    }
+
+    function edgeStrokeColor(source, kind) {
+      const palette = { blue: '#00bfff', green: '#39ff72', amber: '#ffd166', red: '#ff4d6d' };
+      const base = palette[source.dot] || '#39ff72';
+      if (kind !== 'branch') return base;
+      // slightly desaturate branch
+      const hex = base.replace('#', '');
+      const r = parseInt(hex.slice(0,2),16);
+      const g = parseInt(hex.slice(2,4),16);
+      const b = parseInt(hex.slice(4,6),16);
+      const mix = 0.22;
+      const nr = Math.round(r + (80-r)*mix);
+      const ng = Math.round(g + (80-g)*mix);
+      const nb = Math.round(b + (80-b)*mix);
+      return `#${[nr,ng,nb].map(v=>v.toString(16).padStart(2,'0')).join('')}`;
+    }
+
+    function clamp(v,mn,mx){ return Math.max(mn,Math.min(mx,v)); }
+    function dist(a,b){ return Math.hypot(b.x-a.x,b.y-a.y); }
+
+    // ── ORTHOGONAL path (no rounded corners — terminal look) ──
+    function buildRoutePts(source, target) {
+      const hw = 66;
+      const fwd = target.x >= source.x;
+      const up  = target.y < source.y;
+      const sa  = { x: fwd ? source.x+hw : source.x-hw, y: source.y };
+      const ta  = { x: fwd ? target.x-hw : target.x+hw, y: target.y };
+      if (!fwd && ta.x > sa.x-40) ta.x = sa.x-40;
+      if ( fwd && ta.x < sa.x+40) ta.x = sa.x+40;
+      if (Math.abs(target.y-source.y) < 60) return [sa, ta];
+      const laneY = up ? source.y-92 : target.y-92;
+      const viaX  = clamp((sa.x+ta.x)/2, 120, 1680);
+      if (up) return [sa, {x:sa.x,y:laneY}, {x:viaX,y:laneY}, {x:viaX,y:ta.y}, ta];
+      return [{x:sa.x,y:sa.y+5},{x:viaX,y:sa.y+5},{x:viaX,y:laneY},{x:ta.x,y:laneY},{x:ta.x,y:ta.y+5}];
+    }
+
+    function buildSharpPath(pts) {
+      if (!pts.length) return '';
+      return 'M ' + pts[0].x + ' ' + pts[0].y + ' ' +
+        pts.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
+    }
+
+    function routeToPath(s, t) { return buildSharpPath(buildRoutePts(s,t)); }
+
+    function buildMapCanvas() {
+      mapCanvas.innerHTML = '';
+      const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      svg.setAttribute('viewBox','0 0 1800 900');
+      svg.setAttribute('preserveAspectRatio','none');
+      svg.setAttribute('aria-hidden','true');
+      mapCanvas.appendChild(svg);
+      mapSvg = svg;
+
+      pipelineConfig.nodes.forEach(node => {
+        const data  = getStationData(node.id);
+        const title = data.title || node.label;
+        const btn   = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `station-node${node.id===1?' active':''}`;
+        btn.dataset.station = String(node.id);
+        btn.dataset.id = String(node.id).padStart(2,'0');
+        btn.style.left = `${node.x}px`;
+        btn.style.top  = `${node.y}px`;
+        btn.innerHTML = `
+          <div class="node-top"><div class="node-dot ${node.dot}"></div><span class="node-label">${title}</span></div>
+          <div class="node-mini">${node.next.length ? node.next.join(',') : 'exit'}</div>
+        `;
+        mapCanvas.appendChild(btn);
+      });
+
+      stationNodes = Array.from(mapCanvas.querySelectorAll('.station-node'));
+      stationNodes.forEach(n => n.addEventListener('click', () => setActiveStation(n.dataset.station)));
+    }
+
+    function buildEdges() {
+      const svg = mapSvg;
+      if (!svg) return;
+      pipelineConfig.connections.forEach(conn => {
+        const s = pipelineConfig.nodes.find(n=>n.id===conn.from);
+        const t = pipelineConfig.nodes.find(n=>n.id===conn.to);
+        if (!s||!t) return;
+        const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute('class','edge-path');
+        path.setAttribute('d', routeToPath(s,t));
+        path.setAttribute('stroke', edgeStrokeColor(s,conn.kind));
+        path.setAttribute('stroke-width', conn.kind==='branch'?'3':'4');
+        path.setAttribute('stroke-opacity', conn.kind==='branch'?'0.55':'0.85');
+        path.setAttribute('stroke-dasharray', conn.kind==='branch'?'6 4':'none');
+        svg.appendChild(path);
+      });
+    }
+
+    function getConnection(a,b){ return pipelineConfig.connections.find(c=>c.from===a&&c.to===b); }
+
+    function getRoute(fromId,toId) {
+      if (fromId===toId) return [fromId];
+      const queue=[[fromId]], visited=new Set([fromId]);
+      while (queue.length) {
+        const path=queue.shift();
+        const last=path[path.length-1];
+        const outs=pipelineConfig.connections.flatMap(c=>{
+          if (c.from===last) return [{to:c.to}];
+          if (c.to===last)   return [{to:c.from}];
+          return [];
+        });
+        for (const o of outs) {
+          if (visited.has(o.to)) continue;
+          const np=[...path,o.to];
+          if (o.to===toId) return np;
+          visited.add(o.to);
+          queue.push(np);
+        }
+      }
+      return [fromId,toId];
+    }
+
+    function setNodeEnergy(id,on) {
+      const n=stationNodes.find(b=>b.dataset.station===String(id));
+      if (n) n.classList.toggle('energized',on);
+    }
+
+    function animateFocusPath(pathIds,runId) {
+      const svg=mapSvg;
+      if (!svg||pathIds.length<2||runId!==focusRunId) return;
+      const orb=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      orb.setAttribute('width','10'); orb.setAttribute('height','10');
+      orb.setAttribute('class','focus-orb');
+      orb.setAttribute('fill','#7ee8ff');
+      orb.setAttribute('stroke','#c084fc');
+      orb.setAttribute('stroke-width','1');
+      svg.appendChild(orb);
+      const stepDur=500;
+
+      const runStep=idx=>{
+        if (runId!==focusRunId){orb.remove();return;}
+        if (idx>=pathIds.length-1){
+          const fn=pipelineConfig.nodes.find(n=>n.id===pathIds[pathIds.length-1]);
+          if (fn){orb.remove();setNodeEnergy(fn.id,true);}
+          return;
+        }
+        const s=pipelineConfig.nodes.find(n=>n.id===pathIds[idx]);
+        const t=pipelineConfig.nodes.find(n=>n.id===pathIds[idx+1]);
+        const mp=document.createElementNS('http://www.w3.org/2000/svg','path');
+        mp.setAttribute('d',routeToPath(s,t));
+        mp.setAttribute('fill','none');mp.setAttribute('stroke','none');
+        svg.appendChild(mp);
+        const len=mp.getTotalLength();
+        const t0=performance.now();
+        const frame=now=>{
+          if (runId!==focusRunId){mp.remove();orb.remove();return;}
+          const p=Math.min(1,(now-t0)/stepDur);
+          const pt=mp.getPointAtLength(len*p);
+          orb.setAttribute('x',String(pt.x-5));
+          orb.setAttribute('y',String(pt.y-5));
+          if (p<1){requestAnimationFrame(frame);return;}
+          mp.remove();setNodeEnergy(s.id,false);setNodeEnergy(t.id,true);
+          setTimeout(()=>runStep(idx+1),100);
+        };
+        requestAnimationFrame(frame);
+      };
+      runStep(0);
+    }
+
+    // ── PAN STATE ──
+    let currentShift = 0;
+    let panRafId = null;
+
+    function getMaxShift() {
+      const stage = document.getElementById('mapStage');
+      return Math.max(0, 1800 - (stage ? stage.clientWidth : 1800));
+    }
+
+    function applyShift(shift) {
+      const max = getMaxShift();
+      shift = Math.max(0, Math.min(max, shift));
+      currentShift = shift;
+      const pct = max > 0 ? Math.round((shift / max) * 100) : 0;
+      mapCanvas.style.setProperty('--pan-x', `${-shift}px`);
+      mapPan.value = String(pct);
+      panValue.textContent = `${pct}%`;
+    }
+
+    function panToNode(nodeX) {
+      const stage = document.getElementById('mapStage');
+      if (!stage) return;
+      const vw  = stage.clientWidth;
+      const max = getMaxShift();
+      if (max <= 0) return;
+
+      const margin = 120;
+      const visL = currentShift + margin;
+      const visR = currentShift + vw - margin;
+      if (nodeX >= visL && nodeX <= visR) return;
+
+      let target = nodeX - vw / 2;
+      target = Math.max(0, Math.min(max, target));
+
+      if (panRafId) cancelAnimationFrame(panRafId);
+      const start    = currentShift;
+      const delta    = target - start;
+      const duration = 420;
+      const t0       = performance.now();
+      const ease     = t => t < 0.5 ? 2*t*t : -1 + (4 - 2*t) * t;
+
+      const step = now => {
+        const p = Math.min(1, (now - t0) / duration);
+        applyShift(Math.round(start + delta * ease(p)));
+        if (p < 1) panRafId = requestAnimationFrame(step);
+      };
+      panRafId = requestAnimationFrame(step);
+    }
+
+    function setActiveStation(id, options={}) {
+      const animate = options.animate !== false;
+      const data = getStationData(id);
+      if (!data) return;
+      const prev = activeStationId;
+      activeStationId = Number(id);
+      renderStationDetails(activeStationId);
+      stationNodes.forEach(n => n.classList.toggle('active', n.dataset.station === String(id)));
+      Array.from(miniSteps.querySelectorAll('.step-mini')).forEach(s => s.classList.toggle('active', s.dataset.station === String(id)));
+      stationNodes.forEach(n => n.classList.remove('energized'));
+      setNodeEnergy(id, true);
+
+      const node = pipelineConfig.nodes.find(n => n.id === Number(id));
+      if (node) panToNode(node.x);
+
+      if (animate && prev !== activeStationId) {
+        focusRunId += 1;
+        animateFocusPath(getRoute(prev, activeStationId), focusRunId);
+      }
+    }
+
+    function buildMiniSteps() {
+      miniSteps.innerHTML=pipelineConfig.nodes.map(node=>{
+        const data=getStationData(node.id);
+        const title=data.title||node.label;
+        return `
+          <button class="step-mini${node.id===1?' active':''}" data-station="${node.id}" type="button">
+            <span class="mini-num">${node.id}</span>
+            <span><strong style="color:var(--bright);font-size:0.74rem">${title}</strong>${data.output?`<br>${data.output}`:''}</span>
+          </button>
+        `;
+      }).join('');
+      miniSteps.querySelectorAll('.step-mini').forEach(s=>s.addEventListener('click',()=>setActiveStation(s.dataset.station)));
+    }
+
+    async function initializeApp() {
+      const data=await loadPipelineData();
+      const ns=cloneData(data.stations);
+      const nc=cloneData(data.pipelineConfig);
+      Object.keys(stations).forEach(k=>delete stations[k]);
+      Object.assign(stations,ns);
+      pipelineConfig.nodes=nc.nodes;
+      pipelineConfig.connections=nc.connections;
+      buildMapCanvas();
+      buildEdges();
+      buildMiniSteps();
+      applyShift(0);
+      setActiveStation(1,{animate:false});
+    }
+
+    initializeApp().catch(err=>{
+      stationPanel.line.textContent    = 'ERROR';
+      stationPanel.title.textContent   = 'JSON no encontrado';
+      stationPanel.text.textContent    = 'Revisa pipeline_metro_infografia_data.json';
+      stationPanel.input.textContent   = '—';
+      stationPanel.command.textContent = String(err.message||err);
+      stationPanel.output.textContent  = '1 (error)';
+      stationPanel.why.textContent     = 'El archivo JSON externo no pudo leerse.';
+      stationPanel.example.textContent = 'Corrige el JSON y recarga.';
+    });
+
+    // ── SLIDER → applyShift ──
+    mapPan.addEventListener('input', e => {
+      const pct = Number(e.target.value);
+      const max = getMaxShift();
+      applyShift(Math.round((pct / 100) * max));
+    });
+
+    // ── MOUSE DRAG ──
+    (function() {
+      const stage = document.getElementById('mapStage');
+      let dragging = false;
+      let dragStartX = 0;
+      let shiftAtDragStart = 0;
+
+      stage.addEventListener('mousedown', e => {
+        // only drag on the stage background / canvas, not on buttons
+        if (e.target.closest('.station-node')) return;
+        dragging = true;
+        dragStartX = e.clientX;
+        shiftAtDragStart = currentShift;
+        stage.style.cursor = 'grabbing';
+        if (panRafId) { cancelAnimationFrame(panRafId); panRafId = null; }
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const dx = e.clientX - dragStartX;
+        applyShift(shiftAtDragStart - dx);
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        stage.style.cursor = '';
+      });
+
+      // ── TRACKPAD / WHEEL horizontal scroll ──
+      stage.addEventListener('wheel', e => {
+        // prefer horizontal delta; fall back to vertical (shift+scroll or natural scroll)
+        const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (dx === 0) return;
+        e.preventDefault();
+        if (panRafId) { cancelAnimationFrame(panRafId); panRafId = null; }
+        // deltaMode 0 = pixels, 1 = lines (~18px), 2 = pages
+        const scale = e.deltaMode === 0 ? 1 : e.deltaMode === 1 ? 18 : 300;
+        applyShift(currentShift + dx * scale);
+      }, { passive: false });
+    })();
+
+    if (exportPngBtn) {
+      exportPngBtn.addEventListener('click', exportViewportToPng);
+    }
+  </script>
+</body>
+</html>
