@@ -1,0 +1,2578 @@
+---
+title: "Practica1"
+output: html_document
+---
+## Descripción de los datos
+### Información general 
+     - **Bioproject**: PRJNA675355
+     - **Número de acceso de la base de datos GEO**: GSE161045
+     - **Especie**: Homo sapiens
+     - **Número de transcriptomas**: 12 
+     - **Número de réplicas biológicas**: 6 de control (SRX9456983, SRX9456984, SRX9456985, SRX9456986),  4 replicas de Parkinson disease (SRX9456991, SRX9456992, SRX9456993, SRX9456994), y 4 de Alzheimer Disease (SRX9456987, SRX9456988, 
+    SRX9456989, SRX9456990).
+     - **Secuenciador empleado**: Illumina Nova-seq 6000
+
+### Artículo científico
+
+#### Human striatal glia differentially contribute to AD- and PD-specific neurodegeneration, por Jinbin Xu et. al.
+
+Xu, J., Farsad, H. L., Hou, Y., Barclay, K., Lopez, B. A., Yamada, S., Saliu, I. O., Shi, Y., Knight, W. C., Bateman, R. J., Benzinger, T. L. S., Yi, J. J., Li, Q., Wang, T., Perlmutter, J. S., Morris, J. C., & Zhao, G. (2023). Human striatal glia differentially contribute to AD- and PD-specific neurodegeneration. Nature Aging, 3(3), 346–365. https://doi.org/10.1038/s43587-023-00363-8
+
+### Antecedentes (máximo 200 palabras)
+
+La enfermedad de Alzheimer, Parkinson y Huntington se dan debido a acumulaciones de proteínas anormales en el cerebro, es por esto que las diferencias y similitudes entre los pathways que dan lugar a la enfermedad Enfermedad de Parkinson y el Alzheimer son muchas veces, desconocidas. Este artículo propone que el perfil transcriptómico de las microglias en ámbos desordenes comparados con los controles nos puede dar más información acerca de las diferencias entre si y como afecta la neurodegeneración y patologías amiloides.
+
+### Diseño experimental
+
+Tejido cerebral clinica y neuropatológicamente bien definido fue recolectado de donadores humanos fallecidos. Se clasificaron los estadios de las enfermedades en base a acumulaciones de proteína beta amiloide. Después, se hizo scRNA-seq bulk del tejido y se alineo contra la referencia después del curamiento de datos. Esto se hizo con el fin de agrupar poblaciones celulares entre los tejidos y observar las diferencias entre los astrocitos del grupo de control, con PD o AD, así como también de células inmunes y neuronas. Tmabién se relaizó un análisis de expresión diferencial en cada muestra.
+
+### Resultados del artículo (máximo 200 palabras)
+
+Se identificaron tres subpoblaciones de astrocitos y dos de microglia conservados a través de diferentes regiones y condiciones del cerebro. El estudio reflejó genes asociados a la activación de microglias tanto en PD, AD y glioblastoma multiforme. También revelaron activación específica de estados de perfiles transcriptómicos de microglía dependiendo de la enfermedad.
+
+## 1.- Cargar paquetes y archivos
+
+```{r paquetes, message=FALSE, warning=FALSE}
+rm(list = ls())
+base_dir <- file.path(getwd(), "Practica1")
+
+if (!dir.exists(base_dir)) {
+  dir.create(base_dir)
+}
+
+setwd(base_dir)
+library(Matrix) # install.packages("Matrix")
+library(GEOquery) # BiocManager::install("GEOquery")
+library(hdf5r)  # install.packages("hdf5r")
+library(rhdf5)  # BiocManager::install("rhdf5")
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(DoubletFinder) # remotes::install_github('chris-mcginnis-ucsf/DoubletFinder', force = TRUE)
+library(Seurat) ## version 3.1.5.9900
+# library(SeuratDisk)
+
+library(zellkonverter)
+```
+
+Archivo que descargamos del estudio **GSE161045**:
+
+1.  `GSE161045_series_matrix_.txt.gz`
+
+2.  `GSE161045_RAW.tar`
+
+    -   Contiene los archivos \*\_barcodes.tsv.gz, \*\_features.tsv.gz, \*\_matrix.mtx.gz para cada GSM
+
+3.  `*_barcodes.tsv.gz`
+
+    -   Lista de **códigos de barras celulares**.
+    -   Cada código identifica una célula individual en el experimento de scRNA-seq.
+    -   Permite distinguir las lecturas de cada célula.
+
+4.  `*_features.tsv.gz`
+
+    -   Contiene la lista de **genes (features)** analizados.
+    -   Incluye identificadores como el nombre del gen y, a veces, anotaciones adicionales.
+    -   Se usa para mapear las filas de la matriz de conteos.
+
+5.  `*_matrix.mtx.gz`
+
+    -   Es la **matriz de conteos cruda** en formato *Matrix Market*.
+    -   Representa cuántas veces se detectó cada gen en cada célula.
+    -   Este archivo, junto con *barcodes* y *features*, forma el conjunto completo para
+
+### Descargar Archivo Crudo.
+
+```{r dataset, message=FALSE, warning=FALSE}
+library(GEOquery)
+
+# gse <- getGEO("GSE161045", GSEMatrix = TRUE)
+expr <- exprs(gse[[1]])
+
+getGEOSuppFiles("GSE161045")
+
+untar("GSE161045/GSE161045_RAW.tar", exdir = "GSE161045_RAW")
+list.files("GSE161045_RAW", recursive = TRUE)
+```
+
+### Leer cada muestra y colapsarla en una sola
+
+```{r colapsar, message=FALSE, warning=FALSE}
+
+base_dir <- "GSE161045_RAW"
+
+files <- list.files(base_dir, recursive = FALSE)
+
+# extraer IDs GSM
+ids <- sapply(basename(files), function(x) {
+  parts <- strsplit(x, "_")[[1]]
+  paste(parts[1:2], collapse = "_")
+})
+
+unique_ids <- unique(ids)
+for (id in unique_ids) {
+  
+  target_dir <- file.path(base_dir, id)
+  dir.create(target_dir, showWarnings = FALSE)
+  id_files <- files[grepl(id, basename(files))]
+  
+  for (f in id_files) {
+    sample_dir <- file.path(target_dir, basename(f))
+    picadillo <- strsplit(sample_dir,"/")[[1]]
+    file <- paste(picadillo[1],picadillo[3],sep="/")
+    success <- file.copy(file, sample_dir)
+    
+    if (success) file.remove(f)
+  }
+}
+
+sample_dirs <- list.dirs(base_dir, recursive = FALSE)
+
+for (d in sample_dirs) {
+  
+  files <- list.files(d, full.names = TRUE)
+  
+  for (f in files) {
+    
+    new_name <- basename(f)
+    
+    new_name <- sub(".*matrix.mtx.gz$", "matrix.mtx.gz", new_name)
+    new_name <- sub(".*barcodes.tsv.gz$", "barcodes.tsv.gz", new_name)
+    new_name <- sub(".*features.tsv.gz$", "features.tsv.gz", new_name)
+    
+    file.rename(f, file.path(d, new_name))
+  }
+}
+
+
+data_list <- lapply(sample_dirs, Read10X)
+names(data_list) <- basename(sample_dirs)
+```
+
+## Guardar h5ad de manera individual
+
+```{r guardar h5ad}
+feats <- read.delim("GSE161045_RAW/GSM4888892_AD2_features.tsv.gz", header = F)
+
+#Creamos nombre de la carpeta
+
+hd5_dir <- "sub"
+dir.create(hd5_dir)
+message("Carpeta creada: ", hd5_dir)
+
+
+# Basado en lo que viste con list.files
+samples <- c("GSM4888887_CTRL1","GSM4888888_CTRL2", "GSM4888889_CTRL3","GSM4888890_CTRL4", "GSM4888891_AD1", "GSM4888892_AD2", "GSM4888893_AD3", "GSM4888894_AD4", "GSM4888895_PD1", "GSM4888896_PD2", "GSM4888897_PD3", "GSM4888898_PD4")
+
+
+for(i in samples) {
+  message(paste0("Convirtiendo en H5:    ", i))
+  input_dir <- paste0("GSE161045_RAW/", i, "/")
+  fn <- paste0("sub/", i, ".h5") # Nombre del archivo de salida
+  
+  # --- PASO 1: Leer los datos crudos del paciente ---
+  # Read10X lee el trío: matrix.mtx.gz, features.tsv.gz, barcodes.tsv.gz
+  sm3 <- Seurat::Read10X(data.dir = input_dir)
+  # --- PASO 2: Crear el archivo HDF5 (Igual que tu código anterior) ---
+  if(file.exists(fn)) file.remove(fn)
+  rhdf5::h5createFile(fn)
+  rhdf5::h5createGroup(fn, "matrix")
+  
+  # Guardar datos de la matriz
+  rhdf5::h5write(colnames(sm3), fn, "matrix/barcodes")
+  rhdf5::h5write(sm3@x, fn, "matrix/data")
+  rhdf5::h5write(sm3@i, fn, "matrix/indices")
+  rhdf5::h5write(sm3@p, fn, "matrix/indptr")
+  rhdf5::h5write(dim(sm3), fn, "matrix/shape")
+  
+  # Guardar anotaciones de genes (Features)
+  # Aquí asumimos que los rownames ya vienen con el formato correcto
+  rhdf5::h5createGroup(fn, "matrix/features")
+  rhdf5::h5write(rownames(sm3), fn, "matrix/features/name")
+  rhdf5::h5write(rownames(sm3), fn, "matrix/features/id") 
+  rhdf5::h5write(rep("Gene Expression", nrow(sm3)), fn, "matrix/features/feature_type")
+  rhdf5::h5write(rep("GRCh38", nrow(sm3)), fn, "matrix/features/genome")
+  
+  # --- PASO 3: Validación ---
+  message("Validating...")
+  nd <- Seurat::Read10X_h5(fn)
+  message(paste0("Diferencias encontradas: ", sum(!nd == sm3)))
+  message("\n")
+}
+ 
+  
+# # Arreglar features duplicadas
+# for (i in seq_along(data_list)) {
+#   mat <- data_list[[i]]
+#   rownames(mat) <- make.unique(rownames(mat))
+#   data_list[[i]] <- mat
+# }
+# 
+# # Arreglar barcodes duplicados
+# for (i in seq_along(data_list)) {
+#   mat <- data_list[[i]]
+#   colnames(mat) <- paste(names(data_list)[i], colnames(mat), sep = "_")
+#   data_list[[i]] <- mat
+# }
+
+# Merge ya arreglaba lo anterior, pero estoy siguiendo la practica paso a paso entonces xd
+
+
+seurat_list <- lapply(names(data_list), function(n) {
+  CreateSeuratObject(counts = data_list[[n]], project = n)
+})
+
+
+names(seurat_list) <- names(data_list)
+          
+```
+
+## Combinar objetos
+
+```{r combinarlos}
+
+# Combinarlos
+seurat_obj <- merge(
+  x = seurat_list[[1]],
+  y = seurat_list[-1],
+  add.cell.ids = names(seurat_list)
+)
+
+seurat_obj$sample <- sub("^(GSM[0-9]+_[A-Z0-9]+)_.*", "\\1", colnames(seurat_obj))
+seurat_obj$condition <- sub(".*_(CTRL|AD|PD).*", "\\1", colnames(seurat_obj))
+seurat_obj$sample_clean <- sub(".*_", "", seurat_obj$orig.ident)
+seurat_obj$orig.ident <- seurat_obj$sample_clean
+
+
+
+```
+
+Visualizacion de Metadata
+
+```{r}
+head(seurat_obj@meta.data, 10)
+```
+
+Visualizacion de los counts del paciente control 1
+
+```{r GSM488887_CTRL1}
+GetAssayData(seurat_obj, assay = "RNA", layer = "counts.GSM4888887_CTRL1")[1:3, 1:3]
+```
+
+Visualizacion de los counts del paciente con Alzheimer 4
+
+```{r GSM488898_PD4}
+GetAssayData(seurat_obj, assay = "RNA", layer = "counts.GSM4888898_PD4")[1:3, 1:3]
+```
+
+## Calcular la calidad (QC)
+
+-   **Genes mitocondriales (`^MT-`)**
+
+    -   Calidad celular (apoptosis, estrés).
+
+-   **Genes ribosomales (**`^RP[SL]`**)**
+
+    -   Altos porcentajes de genes ribosomales pueden reflejar células en estados de alta síntesis proteica o, en algunos casos, ruido técnico.
+    -   Sirven para evaluar si ciertos clusters están dominados por ribosomas más que por señales biológicas relevantes.
+
+-   **Genes de hemoglobina (**`^HB`**)**
+
+    -   Se expresan en células de origen eritroide o contaminaciones de glóbulos rojos.
+    -   Un alto porcentaje puede indicar contaminación de eritrocitos en la preparación de PBMCs.
+
+-   **Marcadores de plaquetas (**`PECAM1|PF4`**)**
+
+    -   Se usan para detectar contaminación por plaquetas o subpoblaciones plaquetarias.
+    -   Ayudan a decidir si excluir esas células o interpretarlas como una población real.
+
+```{r}
+# Genes Mitocondriales
+seurat_obj <- PercentageFeatureSet(seurat_obj, "^MT-", col.name = "percent_mito")
+# Genes ribosomales (^RP[SL])
+seurat_obj <- PercentageFeatureSet(seurat_obj, "^RP[SL]", col.name = "percent_ribo")
+# Genes de hemoglobina (^HB)
+seurat_obj <- PercentageFeatureSet(seurat_obj, "^HB[^(P|E|S)]", col.name = "percent_hb")
+# Marcadores de plaquetas (PECAM1|PF4)
+seurat_obj <- PercentageFeatureSet(seurat_obj, "PECAM1|PF4", col.name = "percent_plat")
+```
+
+Visualizar la información que acabamos de agregar:
+
+```{r}
+head(seurat_obj[[]])
+```
+
+Visualización grafica
+
+```{r, warning=FALSE, message=FALSE}
+feats <- c("nFeature_RNA", "nCount_RNA", "percent_mito", "percent_ribo", "percent_hb", "percent_plat")
+VlnPlot(seurat_obj, group.by = "sample_clean", split.by = "condition", features = feats, pt.size = 0.1, ncol = 3)
+```
+
+```{r}
+FeatureScatter(seurat_obj, "nCount_RNA", "nFeature_RNA", group.by = "sample_clean", pt.size = .5)
+```
+
+## Filtrado de células con baja calidad
+
+Estaremos filtrando las células con al menos 200 genes detectados, y los genes deben estar expresados en al menos tres células. Estos valores dependen del método de preparación de la biblioteca utilizado.
+
+Genes mitocondriales: Una alta proporción de lecturas mitocondriales suele indicar células dañadas o en apoptosis. Por eso se filtran células con \< 10% de lecturas mitocondriales.
+
+Genes ribosomales: Son muy abundantes y pueden dominar la señal, pero no aportan información biológica específica sobre el estado celular. Control de sesgo técnico, pero sin eliminar células normales con actividad ribosomal fisiológica.
+
+```{r}
+data.filt <- subset(seurat_obj, subset = nFeature_RNA > 200 & 
+                      nFeature_RNA < 2500 & percent_mito < 5 &
+                      percent_ribo < 1)
+dim(data.filt)
+
+table(data.filt$orig.ident)
+```
+
+### ¿Cuántas lecturas totales tiene cada gen en cada dataset?
+
+Además, también podemos ver qué genes contribuyen en mayor medida a esas lecturas. Por ejemplo, podemos representar gráficamente el porcentaje de recuentos por gen:
+
+```{r}
+# Extraer los nombres de los genes del assay
+gene_names <- Features(data.filt, assay = "RNA")
+
+# Asignar rownames a cada matriz dentro de la lista y Obtener una lista con todas las matrices de conteos (cada dataset es un dgCMatrix).
+
+cell_counts <- lapply(data.filt@assays$RNA@layers, function(mat) {
+  rownames(mat) <- gene_names
+  mat
+})
+names(cell_counts) <- sub(".*_", "", names(cell_counts)) # Para evitar nombres largos
+
+# Verificacion
+rownames(cell_counts$AD1)[1:10]
+```
+
+```{r}
+gene_totals <- lapply(cell_counts, function(mat) {
+  rowSums(mat)  # suma de lecturas por gen
+})
+
+# ¿Qué genes son los más abundantes (top 10) en cada dataset?
+top_genes <- lapply(gene_totals, function(x) {
+  sort(x, decreasing = TRUE)[1:10]  # top 10 genes
+})
+
+top_genes
+```
+
+### Calcular cuántas células expresan cada gen
+
+```{r}
+# cell_counts es tu lista de capas con matrices genes × células
+expr_cells <- lapply(cell_counts, function(mat) {
+  # número de células con al menos 1 lectura por gen
+  cells_per_gene <- rowSums(mat > 0)
+  names(cells_per_gene) <- rownames(mat)
+  cells_per_gene
+})
+```
+
+```{r}
+expr_cells$AD2["CRYAB"]
+```
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# 1. Crear data.frame con todos los genes y datasets
+# lapply va a recorre cada nombre de dataset en la lista.
+# do.call Une todos esos data.frame en uno solo, apilándolos fila por fila.
+df_expr <- do.call(rbind, lapply(names(expr_cells), function(name) {
+  data.frame(
+    # el nombre del dataset actual.
+    dataset = name,
+    #  los nombres de los genes en ese dataset.
+    gene = names(expr_cells[[name]]),
+    #  el número de células que expresan cada gen.
+    cells = expr_cells[[name]]
+  )
+}))
+
+# 2. Filtrar solo los top genes
+# lapply va a recorre cada nombre de dataset en la lista.
+# do.call Une todos esos data.frame en uno solo, apilándolos fila por fila.
+df_top <- do.call(rbind, lapply(names(top_genes), function(name) {
+  # obtiene los nombres de los genes top 10 de ese dataset.
+  genes <- names(top_genes[[name]])
+  data.frame(
+    # el nombre del dataset
+    dataset = name,
+    # el nombre del gen
+    gene = genes,
+    # busca en expr_cells cuántas células expresan esos genes específicos.
+    cells = expr_cells[[name]][genes]
+  )
+}))
+
+# Heatmap
+ggplot(df_top, aes(x = dataset, y = gene, fill = cells)) +
+  geom_tile(color = "white") + # heatmap. con bordeado blanco
+  scale_fill_gradient(low = "white", high = "red") +
+  theme_minimal() +
+  labs(title = "Número de células que expresan los top genes",
+       x = "Dataset",
+       y = "Gen")
+```
+
+### Prevalencia relativa de los top genes entre condiciones (Alzheimer vs control)
+
+```{r}
+# Calcular el total de células por dataset
+total_cells <- lapply(cell_counts, function(mat) ncol(mat))
+
+# Crear un data.frame con porcentajes a partir de df_top y total_cells
+df_top_percent <- do.call(rbind, lapply(unique(df_top$dataset), function(name) {
+  total <- total_cells[[name]]  # total de células en ese dataset
+  subset_df <- df_top[df_top$dataset == name, ]
+  subset_df$percent_cells <- 100 * subset_df$cells / total
+  subset_df
+}))
+
+# Ver primeras filas
+head(df_top_percent)
+
+# Graficarlo
+ggplot(df_top_percent, aes(x = dataset, y = gene, fill = percent_cells)) +
+  geom_tile(color = "white") + # heatmap. con bordeado blanco
+  scale_fill_gradient(low = "white", high = "blue") +
+  theme_minimal() +
+  labs(title = "Porcentaje de células que expresan los top genes",
+       x = "Dataset",
+       y = "Gen",
+       fill = "% de células") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Detección del lncRNA MALAT1
+
+-   **Nombre completo**: Metastasis Associated Lung Adenocarcinoma Transcript 1
+-   **Tipo de gen**: ARN largo no codificante (lncRNA), también llamado NEAT2.
+-   **Localización**: Cromosoma 11q13.1 en humanos.
+-   **Función principal**:
+    -   Regulación de la expresión génica a nivel de splicing y transcripción.
+    -   Participa en la organización de dominios nucleares llamados “speckles”.
+    -   Influye en la proliferación y migración celular.
+-   **Expresión**: Se encuentra altamente expresado en muchos tejidos, y en datos de scRNA-seq suele aparecer como uno de los genes con más lecturas porque es muy abundante en el núcleo.
+
+### 1. Calcular el porcentaje de UMIs de MALAT1 por célula
+
+```{r}
+malat1_percent <- lapply(cell_counts, function(mat) {
+  gene_counts <- mat["MALAT1", ]          # lecturas de MALAT1 por célula
+  total_counts <- colSums(mat)            # total de lecturas por célula
+  100 * gene_counts / total_counts        # porcentaje de UMIs de MALAT1
+})
+```
+
+### 2. Calcular la proporción de células que superan el umbral del 20% de los UMIs
+
+```{r}
+malat1_summary <- lapply(malat1_percent, function(pct) {
+  # número total de células en el dataset.
+  total_cells <- length(pct)
+  # número de células con >20% UMIs de MALAT1
+  cells_above <- sum(pct > 20)      
+  #  el porcentaje de células que cumplen esa condición.
+  percent_cells <- 100 * cells_above / total_cells
+  list(total_cells = total_cells,
+       cells_above = cells_above,
+       percent_cells = percent_cells)
+})
+
+malat1_summary
+```
+
+### 3. Calcular el porcentaje global
+
+El lncRNA MALAT1 se usa como marcador de calidad, porque un exceso de MALAT1 puede indicar sesgo técnico. También puede ser biológicamente relevante, ya que regula procesos nucleares.
+
+```{r}
+
+total_cells_all <- sum(sapply(malat1_summary, function(x) x$total_cells))
+cells_above_all <- sum(sapply(malat1_summary, function(x) x$cells_above))
+
+percent_global <- 100 * cells_above_all / total_cells_all
+percent_global
+
+```
+
+### Interpretacion (AQUI ESCRIBES ALGO)
+
+## Normalizacion de los datos
+
+```{r}
+Neuro <- NormalizeData(data.filt, verbose = F)
+
+saveRDS(Neuro, file = "./neuro_tutorial.rds")
+```
+
+
+#Reducción de dimensiones e integración de datos
+
+```{r}
+library(Matrix) # install.packages("Matrix")
+library(hdf5r)  # install.packages("hdf5r")
+library(rhdf5)  # BiocManager::install("rhdf5")
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(Seurat) ## paquete principal de este capítulo
+
+
+# Cargar el objeto desde el archivo RDS
+pbmc <- readRDS("./neuro_tutorial.rds")
+
+# Verificar qué contiene
+pbmc
+```
+
+#Visualización de la relación entre media y varianza de las muestras
+
+```{r}
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", 
+                             nfeatures = 2000, verbose = F )
+
+# Obtener los 10 genes más variables
+top10 <- head(VariableFeatures(pbmc), 10)
+# Colocar la etiqueta de los genes
+plot1 <- VariableFeaturePlot(pbmc)
+# Colocar la etiqueta de los genes
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+# Combinar gráficos lado a lado y poner la leyenda arriba
+combined_plot <- plot1 + plot2 + plot_layout(guides = "collect") & theme(legend.position = "top")
+combined_plot
+```
+
+
+#Escalado de los datos y reducción de dimensiones incial (PCA)
+```{r}
+pbmc <- ScaleData(pbmc, features = VariableFeatures(pbmc))
+```
+
+```{r}
+#Centering and scaling data matrix
+pbmc_pca <- RunPCA(pbmc, verbose = F, npcs = 20)
+```
+
+```{r}
+#Verificar los nuevos campos agregados
+
+Reductions(pbmc_pca)
+```
+
+#Creamos el PCA 
+```{r}
+DimPlot(pbmc_pca, reduction = "pca") + ggtitle("PCA con genes variables")
+```
+
+Exploración inicial con ElbowPlot()
+```{r}
+ElbowPlot(pbmc_pca)
+```
+¿Qué PCs son estadísticamente significativos?
+
+```{r}
+pbmc_jack <- JackStraw(pbmc_pca, num.replicate = 100)
+# Asignar puntuaciones de significancia a las PCs
+pbmc_jack <- ScoreJackStraw(pbmc_jack, dims = 1:20)
+# Visualizar las PCs significativas
+JackStrawPlot(pbmc_jack, dims = 1:20)
+```
+
+#Genes que impulsan PC1- PC10
+```{r}
+VizDimLoadings(pbmc_pca, dims = 1:15, reduction = "pca")
+
+```
+
+
+¿Qué genes y células están impulsando cada PC?
+Ver un solo PCA:
+
+```{r}
+DimHeatmap(pbmc_pca, dims = 1, cells = 500, balanced = TRUE)
+```
+
+Observar los primeros 15 PCAs
+
+```{r}
+DimHeatmap(pbmc_pca, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+
+Clustering de células
+```{r}
+pbmc_pca <- FindNeighbors(pbmc_pca, dims = 1:15)
+pbmc_pca <- FindClusters(pbmc_pca, resolution = 0.5, cluster.name = "unintegrated_clusters")
+pbmc_pca <- FindClusters(pbmc_pca, resolution = 1, cluster.name = "deep_clusters")
+```
+
+
+Reducciones no lineales (UMAP/t-SNE)
+
+```{r}
+# PCA
+pbmc_pca <- RunPCA(pbmc_pca, dims = 1:15, verbose = F)
+```
+
+
+```{r}
+# t-SNE
+pbmc_tsne <- RunTSNE(pbmc_pca, dims = 1:15, verbose = F)
+# UMAP
+pbmc_umap <- RunUMAP(pbmc_pca, dims = 1:15, verbose = F)
+wrap_plots(
+    DimPlot(pbmc_pca, reduction = "pca"),
+    DimPlot(pbmc_tsne, reduction = "tsne"),
+    DimPlot(pbmc_umap, reduction = "umap"),
+    ncol = 3
+) + plot_layout(guides = "collect")
+```
+
+Visualización de muestras y cluster detectados:
+```{r}
+# visualizacion grafica
+DimPlot(pbmc_umap, reduction = "umap", group.by =  c("type", "ident"))
+```
+
+
+Integración de datasets
+```{r}
+# install.packages("harmony")
+suppressMessages(library(harmony))
+
+# Integración con Harmony
+pbmc_integrated <- IntegrateLayers(
+  object = pbmc_pca,
+  method = HarmonyIntegration,   # método de integración
+  orig.reduction = "pca",        # reducción original
+  new.reduction = "harmony",     # nombre de la nueva reducción
+  verbose = FALSE
+)
+```
+
+
+
+```{r}
+# Usar la reducción integrada para clustering y UMAP
+pbmc_integrated <- FindNeighbors(pbmc_integrated, reduction = "harmony", dims = 1:15)
+```
+
+
+```{r}
+pbmc_integrated <- FindClusters(pbmc_integrated, resolution = 1)
+```
+
+```{r}
+# t-sne
+pbmc_integrated_tsne <- RunTSNE(pbmc_integrated, reduction = "harmony", dims = 1:15)
+# umap
+pbmc_integrated_umap <- RunUMAP(pbmc_integrated, reduction = "harmony", dims = 1:15, verbose = F)
+
+# type es igual a condition
+# visualizacion grafica
+DimPlot(pbmc_integrated, reduction = "umap", group.by =  c("orig.ident", "condition", "seurat_clusters"))
+```
+
+
+```{r}
+wrap_plots(
+  # Raw data
+  DimPlot(pbmc_pca, reduction = "pca", group.by = "orig.ident")+NoAxes()+ggtitle("PCA raw data"),
+  DimPlot(pbmc_tsne, reduction = "tsne", group.by = "orig.ident")+NoAxes()+ggtitle("tSNE raw data"),
+  DimPlot(pbmc_umap, reduction = "umap", group.by = "orig.ident")+NoAxes()+ggtitle("UMAP raw data"),
+  # Datos integrados despues de Harmony
+  DimPlot(pbmc_integrated, reduction = "pca", group.by = "orig.ident")+NoAxes()+ggtitle("PCA integrated"),
+  DimPlot(pbmc_integrated_tsne, reduction = "tsne", group.by = "orig.ident")+NoAxes()+ggtitle("tSNE integrated"),
+  DimPlot(pbmc_integrated_umap, reduction = "umap", group.by = "orig.ident")+NoAxes()+ggtitle("UMAP integrated"),
+  ncol = 3
+) + plot_layout(guides = "collect")
+```
+
+
+```{r}
+saveRDS(pbmc_integrated_umap, file = "neuro_integrated.rds")
+```
+
+
+Cargar el dataset de neuro
+```{r}
+library(tidyverse)
+library(patchwork)
+# BiocManager::install(c("SingleCellExperiment","SingleR","celldex"),ask=F)
+library(Seurat)
+library(SingleCellExperiment)
+library(SingleR)
+library(celldex)
+
+# Cargar el objeto desde el archivo RDS
+pbmc_integrated <- readRDS("neuro_integrated.rds")
+
+# Unir las capas del assay activo (ej. RNA)
+pbmc_integrated <- JoinLayers(pbmc_integrated)
+
+# Set the identity as louvain with resolution 1
+sel.clust <- "RNA_snn_res.1"
+# La identidad activa (active.ident) es la variable que Seurat usa por defecto para agrupar células en funciones como FindMarkers, DimPlot, etc.
+alldata <- SetIdent(pbmc_integrated, value = sel.clust)
+# Número de células en cada cluster 
+table(alldata@active.ident)
+```
+
+
+```{r}
+table(alldata$orig.ident)
+```
+
+Identificación de genes marcadores
+```{r}
+# Función: Identifica genes diferencialmente expresados entre dos grupos de células (ej. cluster 0 vs cluster 1, o cluster 0 vs todos los demás).
+markers_genes <- FindAllMarkers(
+    alldata,
+    log2FC.threshold = 0.2, #  umbral de cambio de expresión (default 0.25).
+    test.use = "wilcox", # método estadístico (ej. "wilcox", "MAST", "DESeq2").
+    min.pct = 0.1, # porcentaje mínimo de células que deben expresar el gen.
+    # Exige que la diferencia en la proporción de células que expresan un gen entre el grupo de interés y el grupo de referencia sea al menos del 20%.
+    min.diff.pct = 0.2,
+    only.pos = TRUE, # si TRUE, devuelve solo genes sobreexpresados.
+    max.cells.per.ident = 50, # Limita el número máximo de células usadas por cluster (ident) en el test de DE.
+    assay = "RNA"
+)
+
+markers_genes  %>%
+  # Agrupa la tabla de genes marcadores por el cluster al que pertenecen.
+    group_by(cluster) %>%
+  #  log2 fold change promedio sea mayor que 1.
+    dplyr::filter(avg_log2FC > 1) %>%
+  # Convertir en tabla
+  DT::datatable()
+```
+
+```{r}
+library(ggplot2)
+
+markers_1_0$gene <- rownames(markers_1_0)
+
+# Reemplaza p_val_adj == 0 con el valor mínimo no-cero
+min_pval <- min(markers_1_0$p_val_adj[markers_1_0$p_val_adj > 0])
+markers_1_0$p_val_adj_plot <- ifelse(
+  markers_1_0$p_val_adj == 0,
+  min_pval,
+  markers_1_0$p_val_adj
+)
+
+# Clasificación
+markers_1_0$significant <- "NS"
+markers_1_0$significant[
+  markers_1_0$p_val_adj < 0.05 &
+  abs(markers_1_0$avg_log2FC) > 0.5
+] <- "Significant"
+
+ggplot(markers_1_0,
+       aes(avg_log2FC,
+           -log10(p_val_adj_plot),
+           color = significant)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("NS" = "grey60", "Significant" = "red")) +
+  geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  labs(
+    x = "avg log2FC",
+    y = "-log10(p_val_adj)",
+    title = "Cluster 0 vs Cluster 1"
+  ) +
+  theme_classic()
+```
+
+
+Visualizaciones de genes marcadores
+```{r}
+top25 <- markers_genes %>%
+    group_by(cluster) %>%
+    top_n(-25, p_val_adj) 
+
+# Divide la ventana gráfica en una cuadrícula de 2 filas × 5 columnas, para mostrar hasta 10 gráficos en la misma figura.
+par(mfrow = c(2, 5), mar = c(4, 6, 3, 1))
+# for para los clusters
+for (i in unique(top25$cluster)) {
+    barplot(sort(setNames(top25$avg_log2FC, top25$gene)[top25$cluster == i], F),
+        horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i"
+    )
+    abline(v = c(0, 0.25), lty = c(1, 2))
+}
+```
+```{r}
+# ── Marcadores canónicos por tipo celular (estriado humano) ──────────────────
+
+# Astrocytes
+astro_markers <- c("AQP4", "GFAP", "SLC1A2", "ALDH1L1")
+
+# Oligodendrocytes
+oligo_markers <- c("MBP", "PLP1", "MOG", "MOBP")
+
+# OPCs
+opc_markers <- c("PDGFRA", "VCAN", "OLIG1", "OLIG2")
+
+# Microglia / Immune
+micro_markers <- c("CSF1R", "CX3CR1", "P2RY12", "TMEM119", "AIF1")
+
+# Endothelial / Pericytes
+endo_markers <- c("PECAM1", "CLDN5", "RGS5", "PDGFRB")
+
+# Neuronas (Medium Spiny Neurons del estriado)
+neuron_markers <- c("RBFOX3", "SYT1", "PPP1R1B", "DRD1", "DRD2", "PENK")
+
+# ── FeaturePlot con genes relevantes ────────────────────────────────────────
+features_brain <- c(
+  "AQP4",    # Astrocyte
+  "MBP",     # Oligodendrocyte
+  "PDGFRA",  # OPC
+  "CSF1R",   # Microglia
+  "PECAM1",  # Endothelial
+  "PPP1R1B", # MSN (neurona estriatal)
+  "GFAP",    # Astrocyte reactivo
+  "P2RY12",  # Microglia homeostática
+  "DRD2"     # Neurona dopaminérgica
+)
+
+FeaturePlot(alldata_top5, features = features_brain, ncol = 3)
+```
+
+
+Creamos los Heatmap
+```{r}
+top5 <- markers_genes %>%
+    group_by(cluster) %>%
+  # Selecciona las 5 filas con el valor más pequeño de p_val_adj dentro de cada grupo.
+    slice_min(p_val_adj, n = 5, with_ties = FALSE) 
+
+# crear una ranura «scale.data» para los genes seleccionados
+alldata_top5 <- ScaleData(alldata, features = as.character(unique(top5$gene)), assay = "RNA")
+
+# save
+# saveRDS(alldata_top5, file = "output/alldata_top5.rds")
+# saveRDS(top5, file = "output/top5.rds")
+
+# Visualizacion grafica
+DoHeatmap(alldata_top5, features = as.character(unique(top5$gene)), group.by = sel.clust, assay = "RNA")
+```
+
+Se crea el Dotplot
+```{r}
+DotPlot(alldata_top5, features = rev(as.character(unique(top5$gene))), group.by = sel.clust, assay = "RNA") + coord_flip()
+```
+
+
+Violin plot por cada gen
+```{r}
+top3 <- markers_genes %>%
+    group_by(cluster) %>%
+    slice_min(order_by = p_val_adj, n = 3, with_ties = FALSE)
+# saveRDS(top3, file = "output/top3.rds")
+
+# Establece pt.size en cero si no quieres que todos los puntos oculten las formas del violín, o en un valor pequeño, como 0,1
+VlnPlot(alldata_top5, features = as.character(unique(top3$gene)), ncol = 5, group.by = sel.clust, assay = "RNA", pt.size = 0)
+
+#Vizualización de genes caracteristicos
+VlnPlot(alldata_top5, features = c("MBP", "GFAP"))
+```
+
+
+
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  ANOTACIÓN CON AZIMUTH + ANÁLISIS POSTERIOR
+#  Reemplaza completamente el bloque de SingleR/celldex
+# ═══════════════════════════════════════════════════════════════
+
+# ── 0. Librerías ──────────────────────────────────────────────
+library(Seurat)
+library(SeuratWrappers)
+library(Azimuth)
+library(tidyverse)
+library(patchwork)
+library(ggrepel)
+library(RColorBrewer)
+library(viridis)
+
+# ── 1. Cargar objeto integrado ────────────────────────────────
+pbmc_integrated <- readRDS("neuro_integrated.rds")
+pbmc_integrated <- JoinLayers(pbmc_integrated)
+
+sel.clust <- "RNA_snn_res.1"
+alldata   <- SetIdent(pbmc_integrated, value = sel.clust)
+
+```
+
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 1 · ANOTACIÓN CON AZIMUTH (Cloud)
+# ═══════════════════════════════════════════════════════════════
+
+library(AzimuthAPI)  # devtools::install_github("satijalab/azimuth-api")
+
+# CloudAzimuth envía el objeto a la API y regresa con anotaciones
+# Referencia recomendada para cerebro humano: "humancellatlas" o "allen_brain"
+neuro_annotated <- CloudAzimuth(
+  pbmc_integrated 
+)
+
+# Revisar qué columnas de anotación se generaron
+colnames(neuro_annotated@meta.data) %>% grep("azimuth|predicted", ., value = TRUE)
+
+# Ver distribución de tipos celulares
+table(neuro_annotated$azimuth_broad)
+table(neuro_annotated$azimuth_medium)
+table(neuro_annotated$azimuth_fine)
+
+# Filtrar células de alta confianza (>0.7)
+neuro_highconf <- subset(neuro_annotated, subset = final_level_confidence > 0.7)
+cat("Células totales:         ", ncol(neuro_annotated), "\n")
+cat("Células alta confianza:  ", ncol(neuro_highconf),  "\n")
+
+saveRDS(neuro_annotated, "output/neuro_annotated.rds")
+
+```
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 2 · VISUALIZACIÓN DE ANOTACIONES
+# ═══════════════════════════════════════════════════════════════
+
+neuro_annotated <- readRDS("output/neuro_annotated.rds")
+
+# ── 2A. UMAP con los 3 niveles de anotación ───────────────────
+wrap_plots(
+  DimPlot(neuro_annotated,
+          group.by = "azimuth_broad",
+          label = TRUE, label.size = 3, repel = TRUE) +
+    NoAxes() + ggtitle("Nivel 1 · Tipo celular broad") +
+    theme(plot.title = element_text(face = "bold")),
+
+  DimPlot(neuro_annotated,
+          group.by = "azimuth_fine",
+          label = TRUE, label.size = 2.5, repel = TRUE) +
+    NoAxes() + NoLegend() + ggtitle("Nivel 2 · Subtipo celular") +
+    theme(plot.title = element_text(face = "bold")),
+
+  DimPlot(neuro_annotated,
+          group.by = sel.clust,
+          label = TRUE, label.size = 3) +
+    NoAxes() + ggtitle("Clusters (Louvain res=0.5)") +
+    theme(plot.title = element_text(face = "bold")),
+
+  ncol = 3
+) + plot_layout(guides = "collect")
+
+ggsave("output/umap_azimuth_annotations_1.pdf", width = 18, height = 6)
+
+# ── 2B. Score de confianza en UMAP ────────────────────────────
+FeaturePlot(
+  neuro_annotated,
+  features = "final_level_confidence",
+  cols     = c("lightgrey", "#E05C4B")
+) +
+  labs(title = "Confianza de anotación Azimuth") +
+  theme(plot.title = element_text(face = "bold"))
+
+ggsave("output/umap_azimuth_confidence.pdf", width = 7, height = 6)
+
+# ── 2C. UMAP split por condición ──────────────────────────────
+DimPlot(
+  neuro_annotated,
+  reduction = "umap",
+  group.by  = "azimuth_fine",
+  split.by  = "condition",           # AD / Ctrl / PD
+  label     = TRUE,
+  label.size = 2,
+  repel     = TRUE,
+  ncol      = 3
+) +
+  NoAxes() + NoLegend() +
+  plot_annotation(
+    title = "Subtipos celulares por condición · AD / Ctrl / PD",
+    theme = theme(plot.title = element_text(face = "bold", size = 14))
+  )
+
+ggsave("output/umap_split_celltype.pdf", width = 18, height = 6)
+```
+
+## Subpoblaciones de astrocitos
+
+```{r}
+astro <- subset(neuro_annotated, azimuth_fine == "Astrocyte")
+
+astro <- NormalizeData(astro)
+astro <- FindVariableFeatures(astro)
+astro <- ScaleData(astro)
+astro <- RunPCA(astro)
+astro <- FindNeighbors(astro, dims = 1:10)
+astro <- FindClusters(astro, resolution = 0.6)
+FeaturePlot(astro, features = c("AQP4", "GFAP", "ALDH1L1", "SLC1A2"))
+astro <- RunUMAP(
+  astro,
+  dims = 1:10,
+  n.neighbors = 3
+)
+
+DimPlot(astro, label = TRUE)
+```
+
+
+```{r}
+
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 3 · CORRESPONDENCIA CLUSTER → TIPO CELULAR
+# ═══════════════════════════════════════════════════════════════
+
+# ── Corrección: usar rename_with o nombres directos ───────────
+anno_col <- "azimuth_fine"
+
+cluster_celltype <- neuro_annotated@meta.data %>%
+  group_by(.data[[sel.clust]], .data[[anno_col]]) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(.data[[sel.clust]]) %>%
+  slice_max(n, n = 1, with_ties = FALSE) %>%
+  # Evita rename completamente — renombra con setNames al final
+  setNames(c("cluster", "top_celltype", "n"))
+
+print(cluster_celltype)
+
+# ── Asignar al objeto ─────────────────────────────────────────
+# ── El problema: factor vs character en el lookup ─────────────
+# Solución: usar match() en lugar de [] para el lookup
+
+cluster_vector <- as.character(neuro_annotated@meta.data[[sel.clust]])
+
+celltype_labels <- cluster_celltype$top_celltype[
+  match(cluster_vector, as.character(cluster_celltype$cluster))
+]
+
+# Verificar antes de asignar
+head(celltype_labels)
+length(celltype_labels)           # debe ser igual a ncol(neuro_annotated)
+sum(is.na(celltype_labels))       # debe ser 0
+
+# Asignar directo a meta.data
+neuro_annotated@meta.data$celltype_azimuth <- celltype_labels
+
+# Verificar
+table(neuro_annotated@meta.data$celltype_azimuth)
+
+# UMAP
+DimPlot(neuro_annotated,
+        group.by   = "celltype_azimuth",
+        label      = TRUE,
+        label.size = 3,
+        repel      = TRUE) +
+  NoAxes() +
+  labs(title = "Clusters anotados con Azimuth") +
+  theme(plot.title = element_text(face = "bold"))
+
+ggsave("output/umap_clusters_labeled.pdf", width = 10, height = 7)
+```
+
+```{r}
+#install.packages('BiocManager')
+library('multtest')#BiocManager::install('multtest')
+library("metap") # install.packages('metap')
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 4 · MARCADORES CONSERVADOS POR TIPO CELULAR
+# ═══════════════════════════════════════════════════════════════
+
+# Usar anotación Azimuth como identidad
+neuro_annotated <- SetIdent(neuro_annotated, value = "celltype_azimuth")
+
+# Tipos celulares con suficientes células para el test
+min_cells   <- 20
+valid_types <- names(table(neuro_annotated$celltype_azimuth))[
+  table(neuro_annotated$celltype_azimuth) >= min_cells
+]
+cat("Tipos celulares con ≥", min_cells, "células:\n")
+print(valid_types)
+
+# FindConservedMarkers para cada tipo celular válido
+# grouping.var = "type" → conservado entre AD, Ctrl y PD
+conserved_all <- lapply(valid_types, function(ct) {
+  tryCatch({
+    markers <- FindConservedMarkers(
+      neuro_annotated,
+      ident.1      = ct,
+      grouping.var = "condition",    # AD / Ctrl / PD
+      assay        = "RNA",
+      verbose      = FALSE
+    )
+    markers$celltype <- ct
+    markers$gene     <- rownames(markers)
+    markers
+  }, error = function(e) {
+    message("Error en tipo celular: ", ct, " — ", e$message)
+    NULL
+  })
+})
+names(conserved_all) <- valid_types
+conserved_all <- Filter(Negate(is.null), conserved_all)
+
+saveRDS(conserved_all, "output/conserved_markers_azimuth.rds")
+
+# Top 10 por tipo celular (ordenar por max_pval = el más conservado)
+top_conserved <- bind_rows(conserved_all) %>%
+  group_by(celltype) %>%
+  arrange(max_pval, desc(minimump_p_val)) %>%
+  slice_head(n = 10) %>%
+  ungroup()
+
+print(top_conserved %>% select(celltype, gene, max_pval, minimump_p_val))
+
+```
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  DOTPLOT MEJORADO · Marcadores conservados por tipo celular
+# ═══════════════════════════════════════════════════════════════
+
+conserved_all <- readRDS("output/conserved_markers_azimuth.rds")
+
+# ── 1. Filtrar "False" y genes no informativos ────────────────
+conserved_clean <- bind_rows(conserved_all) %>%
+  filter(
+    celltype != "False",
+    # Eliminar lncRNAs, pseudogenes y genes no anotados
+    !grepl("^AC[0-9]|^AL[0-9]|^LINC|^MIR|^SNOR|^-AS[0-9]|\\.", gene)
+  )
+
+# ── 2. Top 3 genes por tipo celular (más específicos) ─────────
+top3_conserved <- conserved_clean %>%
+  group_by(celltype) %>%
+  arrange(max_pval, desc(minimump_p_val)) %>%
+  slice_head(n = 3) %>%
+  ungroup()
+
+# Verificar genes seleccionados
+print(top3_conserved %>% select(celltype, gene, max_pval))
+
+genes_plot <- unique(top3_conserved$gene)
+genes_plot <- genes_plot[genes_plot %in% rownames(neuro_annotated)]
+
+# ── 3. Objeto sin "False" ─────────────────────────────────────
+neuro_clean <- subset(neuro_annotated,
+                      subset = celltype_azimuth != "False")
+
+# Etiquetas con salto de línea para tipos celulares largos
+neuro_clean@meta.data$celltype_label <- neuro_clean@meta.data$celltype_azimuth %>%
+  str_replace("D1 medium spiny neuron", "D1 MSN") %>%
+  str_replace("CFD\\+MGP\\+ fibroblast", "CFD+ fibroblast") %>%
+  str_replace("LYVE1 macrophage", "LYVE1 macro.") %>%
+  str_replace("Memory CD4 T cell", "CD4 T cell") %>%
+  str_replace("Capillary EC", "Cap. EC")
+
+# ── 4. DotPlot con escala de color divergente ─────────────────
+DotPlot(
+  neuro_clean,
+  features  = rev(genes_plot),
+  group.by  = "celltype_label",
+  dot.scale = 8,
+  assay     = "RNA",
+  scale     = TRUE
+) +
+  coord_flip() +
+  scale_color_gradient2(
+    low      = "#2166AC",
+    mid      = "white",
+    high     = "#B2182B",
+    midpoint = 0,
+    name     = "Avg Expression\n(scaled)"
+  ) +
+  labs(
+    title    = "Marcadores conservados por tipo celular (Azimuth)",
+    subtitle = "Top 3 genes por tipo · AD / Ctrl / PD",
+    x        = NULL,
+    y        = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    plot.title      = element_text(face = "bold", size = 13),
+    plot.subtitle   = element_text(color = "grey50", size = 9),
+    axis.text.x     = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y     = element_text(face = "italic", size = 9),
+    legend.position = "right",
+    legend.key.size = unit(0.5, "cm"),
+    panel.grid.major = element_line(color = "grey92", linewidth = 0.3)
+  )
+
+ggsave("output/dotplot_conserved_clean.pdf", width = 12, height = 10)
+
+
+# ── 5. UMAP sin "False" con etiquetas limpias ─────────────────
+DimPlot(
+  neuro_clean,
+  group.by   = "celltype_label",
+  label      = TRUE,
+  label.size = 3.5,
+  repel      = TRUE,
+  pt.size    = 0.3
+) +
+  NoAxes() +
+  labs(title = "Tipos celulares · Azimuth") +
+  theme(
+    plot.title      = element_text(face = "bold", size = 13),
+    legend.text     = element_text(size = 9),
+    legend.key.size = unit(0.4, "cm")
+  )
+
+ggsave("output/umap_celltype_clean.pdf", width = 10, height = 8)
+```
+
+```{r}
+
+library(RColorBrewer) # 
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 6 · COMPOSICIÓN CELULAR POR CONDICIÓN
+# ═══════════════════════════════════════════════════════════════
+
+meta <- neuro_annotated@meta.data %>%
+  filter(!is.na(celltype_azimuth))
+
+# Proporciones
+prop_df <- meta %>%
+  group_by(condition, celltype_azimuth) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(condition) %>%
+  mutate(prop = n / sum(n))
+
+# Paleta
+n_types   <- n_distinct(prop_df$celltype_azimuth)
+pal_types <- colorRampPalette(brewer.pal(9, "Set1"))(n_types)
+
+p_comp <- ggplot(prop_df, aes(x = condition, y = prop, fill = celltype_azimuth)) +
+  geom_bar(stat = "identity", position = "stack", color = "white", linewidth = 0.25) +
+  scale_fill_manual(values = pal_types) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_discrete(limits = c("CTRL", "AD", "PD")) +   # orden lógico
+  labs(
+    title = "Composición de tipos celulares por condición",
+    x     = NULL, y = "Proporción", fill  = "Tipo celular"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title      = element_text(face = "bold", size = 13),
+    legend.key.size = unit(0.4, "cm"),
+    legend.text     = element_text(size = 9)
+  )
+
+ggsave("output/barplot_celltype_composition.pdf", p_comp, width = 8, height = 6)
+p_comp
+```
+
+## SingleR y Celldex (No muy utiles) (Saltar)
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  ANOTACIÓN CON SingleR + celldex  ·  DATOS CEREBRALES
+#  Reemplaza todas las referencias a pbmc_annotated y "Monocyte"
+# ═══════════════════════════════════════════════════════════════
+
+# ── 0. Librerías ──────────────────────────────────────────────
+library(SingleCellExperiment)
+library(SingleR)
+library(celldex)
+library(RColorBrewer)
+library(viridis)
+library(patchwork)
+
+# ── 1. Convertir a SCE desde el objeto integrado ──────────────
+sce <- as.SingleCellExperiment(pbmc_integrated)
+
+# Referencia: HumanPrimaryCellAtlas (contiene tipos gliales)
+ref.set <- celldex::HumanPrimaryCellAtlasData()
+
+# Ver etiquetas disponibles
+unique(ref.set$label.main)
+head(unique(ref.set$label.fine))
+
+
+# ── 2. Correr SingleR ─────────────────────────────────────────
+pred_main <- SingleR::SingleR(
+  test   = sce,
+  ref    = ref.set,
+  labels = ref.set$label.main
+)
+
+pred_fine <- SingleR::SingleR(
+  test   = sce,
+  ref    = ref.set,
+  labels = ref.set$label.fine
+)
+
+
+# ── 3. Diagnóstico de calidad ─────────────────────────────────
+# Distribución de etiquetas
+table(pred_main$labels)
+table(pred_main$pruned.labels)
+
+# NAs tras la poda (baja confianza)
+cat("NAs en main:", sum(is.na(pred_main$pruned.labels)), "\n")
+cat("NAs en fine:", sum(is.na(pred_fine$pruned.labels)), "\n")
+
+# Visualización de scores
+plotDeltaDistribution(pred_main, ncol = 4, dots.on.top = FALSE)
+plotScoreHeatmap(pred_main)
+
+
+# ── 4. Agregar etiquetas al objeto neuro_annotated ────────────
+# Filtrar etiquetas con < 10 células (poco confiables)
+lbls.keep <- table(pred_main$labels) > 10
+
+neuro_annotated$SingleR.labels <- ifelse(
+  lbls.keep[pred_main$labels],
+  pred_main$labels,
+  "Other"
+)
+
+# Agregar main y fine
+neuro_annotated[["singler_main"]] <- rep("NA", ncol(neuro_annotated))
+neuro_annotated$singler_main[rownames(pred_main)] <- pred_main$labels
+
+neuro_annotated[["singler_fine"]] <- rep("NA", ncol(neuro_annotated))
+neuro_annotated$singler_fine[rownames(pred_fine)] <- pred_fine$labels
+
+# Ver etiquetas únicas — espera ver: Neurons, Astrocyte, Microglia, etc.
+unique(neuro_annotated$singler_main)
+
+
+# ── 5. FeaturePlots con genes cerebrales relevantes ───────────
+# (reemplaza CD38 y KLRB1 que son marcadores de PBMC)
+spectral_pal <- rev(brewer.pal(n = 11, name = "Spectral"))
+
+FeaturePlot(neuro_annotated, "AQP4") +        # Astrocyte
+  scale_colour_gradientn(colours = spectral_pal) +
+  ggtitle("AQP4 · Astrocyte marker")
+
+FeaturePlot(neuro_annotated, "MBP") +         # Oligodendrocyte
+  scale_colour_gradientn(colours = spectral_pal) +
+  ggtitle("MBP · Oligodendrocyte marker")
+
+FeaturePlot(neuro_annotated, "CSF1R") +       # Microglia
+  scale_colour_gradientn(colours = spectral_pal) +
+  ggtitle("CSF1R · Microglia marker")
+
+
+# ── 6. Guardar ────────────────────────────────────────────────
+saveRDS(neuro_annotated, file = "output/neuro_singler_annotated.rds")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  VISUALIZACIONES
+# ═══════════════════════════════════════════════════════════════
+
+# ── 7. Composición por muestra (orig.ident) ───────────────────
+p_by_sample <- ggplot(
+  neuro_annotated@meta.data,
+  aes(x = orig.ident, fill = singler_main)
+) +
+  geom_bar(position = "fill") +
+  scale_fill_viridis(discrete = TRUE, name = "Tipo celular") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Composición celular por muestra (SingleR main)",
+    x     = NULL, y = "Proporción"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title  = element_text(face = "bold")
+  )
+
+# ── 8. Composición por condición (CTRL / AD / PD) ─────────────
+p_by_condition <- ggplot(
+  neuro_annotated@meta.data,
+  aes(x = factor(condition, levels = c("CTRL", "AD", "PD")),
+      fill = singler_main)
+) +
+  geom_bar(position = "fill") +
+  scale_fill_viridis(discrete = TRUE, name = "Tipo celular") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_discrete(labels = c("CTRL" = "Control", "AD" = "AD", "PD" = "PD")) +
+  labs(
+    title = "Composición celular por condición (SingleR main)",
+    x     = NULL, y = "Proporción"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+
+p_by_sample / p_by_condition
+ggsave("output/barplot_singler_composition.pdf", width = 10, height = 10)
+
+# ── 9. Composición fine por condición ────────────────────────
+ggplot(
+  neuro_annotated@meta.data,
+  aes(x = singler_fine,
+      fill = factor(condition, levels = c("CTRL","AD","PD")))
+) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(
+    values = c("CTRL" = "#4CAF7D", "AD" = "#E05C4B", "PD" = "#4B7FBE"),
+    labels = c("Control", "AD", "PD"),
+    name   = "Condición"
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Proporción de condición por subtipo celular (SingleR fine)",
+    x     = NULL, y = "Proporción"
+  ) +
+  theme_classic(base_size = 10) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    plot.title  = element_text(face = "bold")
+  )
+
+ggsave("output/barplot_singler_fine_condition.pdf", width = 14, height = 6)
+
+# ── 10. UMAP con anotaciones SingleR ─────────────────────────
+wrap_plots(
+  DimPlot(neuro_annotated,
+          group.by = "singler_main",
+          label = TRUE, label.size = 3, repel = TRUE) +
+    NoAxes() + ggtitle("SingleR · Main labels"),
+
+  DimPlot(neuro_annotated,
+          group.by = "singler_fine",
+          label = TRUE, label.size = 2.5, repel = TRUE) +
+    NoLegend() + NoAxes() + ggtitle("SingleR · Fine labels"),
+
+  ncol = 2
+) + plot_layout(guides = "collect")
+
+ggsave("output/umap_singler_labels.pdf", width = 14, height = 6)
+
+# ── 11. Separar y visualizar un tipo celular de interés ───────
+# Reemplaza "Monocyte" por tipos cerebrales relevantes
+unique(neuro_annotated$singler_main)   # ver qué tipos hay
+
+# Ejemplo: aislar Astrocytes
+neuro_astro <- neuro_annotated[,
+  neuro_annotated$singler_main == "Astrocyte"
+]
+DimPlot(neuro_astro, group.by = "condition",
+        cols = c("CTRL" = "#4CAF7D", "AD" = "#E05C4B", "PD" = "#4B7FBE")) +
+  NoAxes() +
+  ggtitle("Astrocytes · por condición")
+
+# Ejemplo: aislar Microglia
+neuro_micro <- neuro_annotated[,
+  neuro_annotated$singler_main == "Microglia"
+]
+DimPlot(neuro_micro, group.by = "condition",
+        cols = c("CTRL" = "#4CAF7D", "AD" = "#E05C4B", "PD" = "#4B7FBE")) +
+  NoAxes() +
+  ggtitle("Microglia · por condición")
+```
+
+
+
+
+Control del Ciclo celular
+Asignar fases con CellCycleScoring
+
+```{r}
+# Cargar listas de genes
+s.genes <- cc.genes.updated.2019$s.genes
+g2m.genes <- cc.genes.updated.2019$g2m.genes
+
+
+# Asignar ciclo celular
+neuro_annotated <- CellCycleScoring(neuro_annotated,
+                               s.features = s.genes,
+                               g2m.features = g2m.genes,
+                               set.ident = TRUE)
+
+table(neuro_annotated$orig.ident)
+
+
+```
+
+
+
+Visualizar resultados
+Creamos un gráfico de violín para las puntuaciones del ciclo celular.
+
+```{r}
+VlnPlot(neuro_annotated, features = c("S.Score", "G2M.Score"), group.by = "orig.ident", ncol = 2, pt.size = .1)
+
+FeaturePlot(neuro_annotated, features = c("S.Score","G2M.Score"),label.size = 4,repel = T,label = T) & 
+  theme(plot.title = element_text(size=10))
+```
+
+
+Comprobar la fase celular en el UMAP.
+
+```{r}
+DimPlot(neuro_annotated, reduction = 'umap', group.by = "Phase")
+```
+## Me dio curiosidad los oligodendrocitos
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  DIAGNÓSTICO: G2M en Oligodendrocitos
+# ═══════════════════════════════════════════════════════════════
+
+# ── 1. Aislar oligodendrocitos ────────────────────────────────
+oligo <- subset(neuro_annotated, 
+                subset = celltype_azimuth == "Oligodendrocyte")
+
+# Asignar ciclo celular
+s.genes   <- cc.genes.updated.2019$s.genes
+g2m.genes <- cc.genes.updated.2019$g2m.genes
+
+oligo <- CellCycleScoring(oligo,
+                          s.features   = s.genes,
+                          g2m.features = g2m.genes,
+                          set.ident    = FALSE)
+
+# ── 2. ¿Cuántos están en G2M por condición? ──────────────────
+table(oligo$Phase, oligo$condition)
+
+# Proporción
+prop.table(table(oligo$Phase, oligo$condition), margin = 2)
+
+
+# ── 3. ¿Son OPCs o oligodendrocitos maduros? ─────────────────
+# OPCs expresan PDGFRA, maduros expresan MBP/PLP1
+VlnPlot(oligo,
+        features  = c("PDGFRA", "MBP", "PLP1", "MOG"),
+        group.by  = "Phase",
+        ncol      = 4,
+        pt.size   = 0,
+        cols      = c("G1" = "#4CAF7D", "S" = "#F5A623", "G2M" = "#E05C4B")
+) &
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        plot.title  = element_text(face = "italic"))
+
+
+# ── 4. ¿Qué genes G2M se están expresando realmente? ─────────
+# Ver cuáles genes del panel disparan el score
+g2m_expressed <- g2m.genes[g2m.genes %in% rownames(oligo)]
+
+avg_expr <- AverageExpression(
+  oligo,
+  features = g2m_expressed,
+  group.by = "condition",
+  assay    = "RNA"
+)$RNA
+
+# Top genes G2M por condición
+avg_df <- as.data.frame(avg_expr) %>%
+  rownames_to_column("gene") %>%
+  pivot_longer(-gene, names_to = "condition", values_to = "expr") %>%
+  group_by(condition) %>%
+  slice_max(expr, n = 10)
+
+ggplot(avg_df, aes(x = reorder(gene, expr), y = expr, fill = condition)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("CTRL" = "#4CAF7D",
+                               "AD"   = "#E05C4B",
+                               "PD"   = "#4B7FBE")) +
+  coord_flip() +
+  labs(title    = "Top genes G2M en Oligodendrocitos",
+       subtitle = "¿Mitosis real o estrés/reparación DNA chanchanchan?",
+       x = NULL, y = "Expresión promedio") +
+  theme_classic(base_size = 11) +
+  theme(plot.title    = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "grey50", size = 9))
+
+ggsave("output/g2m_genes_oligo.pdf", width = 9, height = 6)
+
+
+# ── 5. UMAP de oligodendrocitos coloreado por Phase ───────────
+wrap_plots(
+  DimPlot(oligo, group.by = "Phase",
+          cols = c("G1" = "#4CAF7D", "S" = "#F5A623", "G2M" = "#E05C4B")) +
+    NoAxes() + ggtitle("Ciclo celular"),
+
+  DimPlot(oligo, group.by = "condition",
+          cols = c("CTRL" = "grey70", "AD" = "#E05C4B", "PD" = "#4B7FBE")) +
+    NoAxes() + ggtitle("Condición"),
+
+  FeaturePlot(oligo, features = "G2M.Score",
+              cols = c("lightgrey", "#E05C4B")) +
+    NoAxes() + ggtitle("G2M Score"),
+
+  FeaturePlot(oligo, features = "PDGFRA",
+              cols = c("lightgrey", "#2196F3")) +
+    NoAxes() + ggtitle("PDGFRA · OPC marker"),
+  ncol = 2
+)
+
+ggsave("output/umap_oligo_cellcycle.pdf", width = 11, height = 10)
+
+
+# ── 6. ¿El G2M score es mayor en AD o PD? ────────────────────
+ggplot(oligo@meta.data,
+       aes(x = factor(condition, levels = c("CTRL","AD","PD")),
+           y = G2M.Score,
+           fill = condition)) +
+  geom_violin(trim = FALSE, alpha = 0.8) +
+  geom_boxplot(width = 0.1, fill = "white", outlier.size = 0.3) +
+  scale_fill_manual(values = c("CTRL" = "#4CAF7D",
+                               "AD"   = "#E05C4B",
+                               "PD"   = "#4B7FBE")) +
+  scale_x_discrete(labels = c("CTRL" = "Control")) +
+  labs(title    = "G2M Score en Oligodendrocitos por condición",
+       subtitle = "Score elevado → estrés oxidativo / daño DNA, no necesariamente mitosis",
+       x = NULL, y = "G2M Score") +
+  theme_classic(base_size = 12) +
+  theme(plot.title    = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "grey50", size = 9),
+        legend.position = "none")
+
+ggsave("output/violin_g2m_condition.pdf", width = 7, height = 5)
+```
+
+Fijamos puntuaciones
+```{r}
+FeatureScatter(neuro_annotated, "S.Score", "G2M.Score", group.by = "Phase")
+```
+
+
+Punto de decidir si corregir
+
+```{r}
+seurat_obj <- ScaleData(neuro_annotated, vars.to.regress = c("S.Score", "G2M.Score"))
+seurat_obj
+```
+
+
+Expresión diferencial entre condiciones (condition)
+
+Cambio de identidad
+```{r}
+sub_cell_selection <- alldata
+sub_cell_selection <- SetIdent(sub_cell_selection, value = "condition")
+```
+
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  EXPRESIÓN DIFERENCIAL  ·  AD vs CTRL vs PD  (estriado humano)
+#  Xu et al. 2023 · Nature Aging
+# ═══════════════════════════════════════════════════════════════
+
+# ── 0. Librerías ──────────────────────────────────────────────
+library(tidyverse)
+library(patchwork)
+library(Seurat)
+library(SingleCellExperiment)
+library(SingleR)
+library(celldex)
+library(edgeR)
+library(RColorBrewer)
+library(ggrepel)
+library(viridis)
+library(ComplexHeatmap)   # BiocManager::install("ComplexHeatmap")
+library(circlize)
+
+# ── 1. Cargar y preparar objeto ───────────────────────────────
+neuro_annotated <- readRDS("output/neuro_annotated.rds")
+neuro_annotated <- JoinLayers(neuro_annotated)
+
+sel.clust <- "RNA_snn_res.0.6"
+alldata    <- SetIdent(neuro_annotated, value = sel.clust)
+
+# Verificar grupos (debe dar AD=4, Ctrl=4, PD=4)
+table(alldata$condition)  
+# Si se llama diferente: colnames(alldata@meta.data)
+```
+
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  PSEUDOBULK INCORRECTO NO SIRVE EDGER
+# ═══════════════════════════════════════════════════════════════
+
+library(edgeR)
+
+# ── 1. Verificar dispersión del pseudobulk mezclado ───────────
+plotBCV(dge.list, main = "BCV - todas las células mezcladas")
+# Si BCV > 0.5 en la mayoría de genes → sobredispersión por mezcla de tipos
+
+# ── 2. Función: pseudobulk para un tipo celular ───────────────
+run_pseudobulk_celltype <- function(obj, celltype_col, celltype_name,
+                                    sample_col = "sample_name",
+                                    condition_col = "condition") {
+  
+  # Subset al tipo celular
+  cells_keep <- obj@meta.data[[celltype_col]] == celltype_name
+  cat("\n── Tipo celular:", celltype_name, 
+      "| n células:", sum(cells_keep), "\n")
+  
+  if (sum(cells_keep) < 50) {
+    message("  Muy pocas células, omitiendo.")
+    return(NULL)
+  }
+  
+  sub_obj <- obj[, cells_keep]
+  counts  <- GetAssayData(sub_obj, assay = "RNA", layer = "counts")
+  
+  # Pseudobulk: sumar por muestra
+  samples <- id_condition_map$sample_name
+  pseudo  <- sapply(samples, function(s) {
+    ident <- id_condition_map$orig.ident[id_condition_map$sample_name == s]
+    cells <- colnames(sub_obj)[sub_obj@meta.data[[sample_col]] == s |
+                               sub_obj$orig.ident == ident]
+    if (length(cells) == 0) return(rep(0, nrow(counts)))
+    Matrix::rowSums(counts[, cells, drop = FALSE])
+  })
+  
+  # Verificar que cada muestra tiene células
+  cells_per_sample <- sapply(samples, function(s) {
+    ident <- id_condition_map$orig.ident[id_condition_map$sample_name == s]
+    sum(sub_obj$orig.ident == ident)
+  })
+  cat("  Células por muestra:\n")
+  print(cells_per_sample)
+  
+  # Omitir muestras con 0 células
+  keep_samples <- cells_per_sample > 0
+  if (sum(keep_samples) < 6) {
+    message("  Menos de 6 muestras con células, omitiendo.")
+    return(NULL)
+  }
+  
+  pseudo      <- pseudo[, keep_samples, drop = FALSE]
+  grp_labels  <- factor(id_condition_map$condition[keep_samples],
+                        levels = c("CTRL", "AD", "PD"))
+  
+  # edgeR
+  dge <- DGEList(counts = pseudo, group = grp_labels)
+  keep_genes <- filterByExpr(dge)
+  cat("  Genes filtrados:", sum(keep_genes), "\n")
+  
+  if (sum(keep_genes) < 100) {
+    message("  Pocos genes expresados, omitiendo.")
+    return(NULL)
+  }
+  
+  dge <- dge[keep_genes, , keep.lib.sizes = FALSE]
+  dge <- normLibSizes(dge)
+  
+  design_ct <- model.matrix(~ 0 + grp_labels)
+  colnames(design_ct) <- levels(grp_labels)
+  
+  dge <- estimateDisp(dge, design_ct, robust = TRUE)
+  fit <- glmQLFit(dge, design_ct, robust = TRUE)
+  
+  # Tres contrastes
+  # Solo los contrastes posibles con los grupos disponibles
+  available <- levels(grp_labels)[levels(grp_labels) %in% unique(grp_labels)]
+  
+  contrasts_ct <- makeContrasts(
+    AD_vs_Ctrl = AD - CTRL,
+    PD_vs_Ctrl = PD - CTRL,
+    AD_vs_PD   = AD - PD,
+    levels     = design_ct
+  )
+  
+  res_list <- lapply(colnames(contrasts_ct), function(ct) {
+    tryCatch({
+      qlf <- glmQLFTest(fit, contrast = contrasts_ct[, ct])
+      res <- topTags(qlf, n = Inf)$table
+      res$contrast  <- ct
+      res$gene      <- rownames(res)
+      res$celltype  <- celltype_name
+      res
+    }, error = function(e) NULL)
+  })
+  
+  bind_rows(res_list)
+}
+
+# ── 3. Correr para cada tipo celular ─────────────────────────
+# Ver tipos disponibles
+valid_celltypes <- names(table(neuro_annotated$azimuth_fine))[
+  table(neuro_annotated$azimuth_fine) >= 50 &
+  names(table(neuro_annotated$azimuth_fine)) != "False"
+]
+print(valid_celltypes)
+
+# Correr pseudobulk por tipo celular
+results_by_celltype <- lapply(valid_celltypes, function(ct) {
+  tryCatch(
+    run_pseudobulk_celltype(neuro_annotated, 
+                            celltype_col  = "azimuth_fine",
+                            celltype_name = ct),
+    error = function(e) {
+      message("Error en ", ct, ": ", e$message)
+      NULL
+    }
+  )
+})
+names(results_by_celltype) <- valid_celltypes
+results_by_celltype <- Filter(Negate(is.null), results_by_celltype)
+
+# Combinar todos
+results_all <- bind_rows(results_by_celltype)
+saveRDS(results_all, "output/pseudobulk_by_celltype.rds")
+
+# ── 4. Diagnóstico por tipo celular ───────────────────────────
+results_all %>%
+  filter(FDR < 0.05, abs(logFC) > 1) %>%
+  group_by(celltype, contrast) %>%
+  summarise(n_DEG = n(), .groups = "drop") %>%
+  arrange(desc(n_DEG)) %>%
+  print(n = 30)
+
+# ── 5. Volcano por tipo celular de interés ────────────────────
+# Ejemplo: Microglia AD vs Ctrl
+micro_AD <- results_all %>%
+  filter(celltype == "Microglia", contrast == "AD_vs_Ctrl")
+
+oligo_AD <- results_all %>%
+  filter(celltype == "Oligodendrocyte", contrast == "AD_vs_Ctrl")
+
+astro_AD <- results_all %>%
+  filter(celltype == "Astrocyte", contrast == "AD_vs_Ctrl")
+
+p_micro <- volcano_plot(micro_AD,  "Microglia · AD vs Control")
+p_oligo <- volcano_plot(oligo_AD,  "Oligodendrocyte · AD vs Control")
+p_astro <- volcano_plot(astro_AD,  "Astrocyte · AD vs Control")
+
+p_micro + p_oligo + p_astro + plot_layout(ncol = 3)
+ggsave("output/volcano_celltype_AD.pdf", width = 16, height = 6)
+
+# ── 6. Resumen visual: n DEGs por tipo celular y contraste ────
+deg_summary <- results_all %>%
+  filter(FDR < 0.05, abs(logFC) > 1) %>%
+  mutate(direction = ifelse(logFC > 0, "Up", "Down")) %>%
+  group_by(celltype, contrast, direction) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(n_plot = ifelse(direction == "Down", -n, n))
+
+ggplot(deg_summary, 
+       aes(x = celltype, y = n_plot, fill = direction)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 0, linewidth = 0.3) +
+  facet_wrap(~ contrast, ncol = 1) +
+  scale_fill_manual(values = c("Up" = "#E05C4B", "Down" = "#4B7FBE")) +
+  scale_y_continuous(labels = abs) +
+  coord_flip() +
+  labs(
+    title = "DEGs por tipo celular y contraste",
+    x = NULL, y = "N genes (Up / Down)",
+    fill = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    plot.title  = element_text(face = "bold"),
+    strip.text  = element_text(face = "bold"),
+    legend.position = "top"
+  )
+
+ggsave("output/DEG_summary_by_celltype.pdf", width = 10, height = 12)
+```
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  PSEUDOBULK
+# ═══════════════════════════════════════════════════════════════
+
+# ── Función para un tipo celular ──────────────────────────────
+run_de_celltype <- function(obj, celltype_name, 
+                             celltype_col = "celltype_azimuth",
+                             condition_col = "condition") {
+  
+  sub <- subset(obj, subset = !!sym(celltype_col) == celltype_name)
+  cat("\n── ", celltype_name, " · ", ncol(sub), " células\n")
+  
+  # Verificar que hay células de los 3 grupos
+  n_per_group <- table(sub@meta.data[[condition_col]])
+  print(n_per_group)
+  if (any(n_per_group < 10)) {
+    message("  Grupo con < 10 células, omitiendo")
+    return(NULL)
+  }
+  
+  Idents(sub) <- condition_col
+  
+  # AD vs CTRL
+  de_AD <- tryCatch(FindMarkers(sub, ident.1 = "AD", ident.2 = "CTRL",
+    test.use = "wilcox", logfc.threshold = 0, min.pct = 0.1, assay = "RNA"),
+    error = function(e) NULL)
+  
+  # PD vs CTRL  
+  de_PD <- tryCatch(FindMarkers(sub, ident.1 = "PD", ident.2 = "CTRL",
+    test.use = "wilcox", logfc.threshold = 0, min.pct = 0.1, assay = "RNA"),
+    error = function(e) NULL)
+  
+  # AD vs PD
+  de_ADvsPD <- tryCatch(FindMarkers(sub, ident.1 = "AD", ident.2 = "PD",
+    test.use = "wilcox", logfc.threshold = 0, min.pct = 0.1, assay = "RNA"),
+    error = function(e) NULL)
+  
+  # Combinar
+  list(
+    AD_vs_Ctrl = if (!is.null(de_AD))    { de_AD$gene    <- rownames(de_AD);    de_AD$contrast    <- "AD_vs_Ctrl"; de_AD$celltype <- celltype_name; de_AD } else NULL,
+    PD_vs_Ctrl = if (!is.null(de_PD))    { de_PD$gene    <- rownames(de_PD);    de_PD$contrast    <- "PD_vs_Ctrl"; de_PD$celltype <- celltype_name; de_PD } else NULL,
+    AD_vs_PD   = if (!is.null(de_ADvsPD)){ de_ADvsPD$gene <- rownames(de_ADvsPD); de_ADvsPD$contrast <- "AD_vs_PD"; de_ADvsPD$celltype <- celltype_name; de_ADvsPD } else NULL
+  )
+}
+
+# ── Tipos celulares válidos (sin False/Splatter) ──────────────
+valid_celltypes <- names(table(neuro_annotated$celltype_azimuth))[
+  table(neuro_annotated$celltype_azimuth) >= 50 &
+  !names(table(neuro_annotated$celltype_azimuth)) %in% c("False", "Splatter neuron")
+]
+print(valid_celltypes)
+
+# ── Correr para todos ─────────────────────────────────────────
+de_results <- lapply(valid_celltypes, function(ct) {
+  tryCatch(run_de_celltype(neuro_annotated, ct),
+           error = function(e) { message("Error: ", ct); NULL })
+})
+names(de_results) <- valid_celltypes
+
+# Combinar en un solo dataframe
+de_all <- bind_rows(lapply(de_results, function(x) {
+  if (is.null(x)) return(NULL)
+  bind_rows(x)
+}))
+
+saveRDS(de_all, "output/de_wilcox_by_celltype.rds")
+
+# ── Diagnóstico ───────────────────────────────────────────────
+de_all %>%
+  filter(p_val_adj < 0.05, abs(avg_log2FC) > 0.5) %>%
+  group_by(celltype, contrast) %>%
+  summarise(n_DEG = n(), .groups = "drop") %>%
+  arrange(desc(n_DEG)) %>%
+  print(n = 30)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  VOLCANO PLOTS por tipo celular
+# ═══════════════════════════════════════════════════════════════
+
+volcano_seurat <- function(df, title, fc_cut = 0.5, p_cut = 0.05, n_label = 15) {
+  
+  # Cap p_val_adj == 0
+  min_p <- min(df$p_val_adj[df$p_val_adj > 0], na.rm = TRUE)
+  
+  df <- df %>%
+    mutate(
+      p_plot    = ifelse(p_val_adj == 0, min_p, p_val_adj),
+      direction = case_when(
+        p_val_adj < p_cut & avg_log2FC >  fc_cut ~ "Up",
+        p_val_adj < p_cut & avg_log2FC < -fc_cut ~ "Down",
+        TRUE ~ "NS"
+      )
+    )
+  
+  n_up   <- sum(df$direction == "Up")
+  n_down <- sum(df$direction == "Down")
+  
+  to_label <- bind_rows(
+    df %>% filter(direction == "Up")   %>% arrange(p_plot, desc(avg_log2FC)) %>% head(n_label),
+    df %>% filter(direction == "Down") %>% arrange(p_plot, avg_log2FC)       %>% head(n_label)
+  ) %>% filter(!grepl("^AC[0-9]|^AL[0-9]|^LINC", gene))  # filtrar lncRNAs
+  
+  ggplot(df, aes(avg_log2FC, -log10(p_plot), color = direction)) +
+    geom_point(aes(alpha = direction), size = 0.8) +
+    scale_alpha_manual(values = c("NS" = 0.15, "Up" = 0.8, "Down" = 0.8), guide = "none") +
+    scale_color_manual(
+      values = c("NS" = "grey75", "Up" = "#E05C4B", "Down" = "#4B7FBE"),
+      labels = c("NS" = "NS", 
+                 "Up" = paste0("Up (", n_up, ")"),
+                 "Down" = paste0("Down (", n_down, ")"))
+    ) +
+    geom_vline(xintercept = c(-fc_cut, fc_cut), linetype = "dashed", 
+               color = "grey40", linewidth = 0.4) +
+    geom_hline(yintercept = -log10(p_cut), linetype = "dashed",
+               color = "grey40", linewidth = 0.4) +
+    geom_text_repel(data = to_label, aes(label = gene),
+                    color = "black", size = 2.5, fontface = "italic",
+                    max.overlaps = 20, segment.color = "grey60") +
+    scale_x_continuous(limits = c(-4, 4), oob = scales::squish) +
+    labs(title    = title,
+         subtitle = paste0("|log2FC| > ", fc_cut, "  ·  FDR < ", p_cut),
+         x = "avg log2FC", y = expression(-log[10](FDR)),
+         color = NULL) +
+    theme_classic(base_size = 11) +
+    theme(plot.title    = element_text(face = "bold", size = 12),
+          plot.subtitle = element_text(color = "grey50", size = 8),
+          legend.position = "top")
+}
+
+# ── Volcano para tipos celulares principales ──────────────────
+for (ct in c("Microglia", "Oligodendrocyte", "Astrocyte")) {
+  
+  p1 <- volcano_seurat(
+    de_all %>% filter(celltype == ct, contrast == "AD_vs_Ctrl"),
+    paste0(ct, " · AD vs Control"))
+  
+  p2 <- volcano_seurat(
+    de_all %>% filter(celltype == ct, contrast == "PD_vs_Ctrl"),
+    paste0(ct, " · PD vs Control"))
+  
+  p3 <- volcano_seurat(
+    de_all %>% filter(celltype == ct, contrast == "AD_vs_PD"),
+    paste0(ct, " · AD vs PD"))
+  
+  p_combined <- p1 + p2 + p3 + plot_layout(ncol = 3)
+  ggsave(paste0("output/volcano_", gsub(" ", "_", ct), ".pdf"),
+         p_combined, width = 16, height = 6)
+  print(p_combined)
+}
+```
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 3 · HEATMAP  comparativo de los 3 grupos
+# ═══════════════════════════════════════════════════════════════
+de_all <- bind_rows(lapply(de_results, function(x) {
+  if (is.null(x)) return(NULL)
+  bind_rows(x)   # aplana los 3 contrastes por tipo celular
+}))
+
+# Verificar estructura
+head(de_all)
+colnames(de_all)   # debe tener: gene, avg_log2FC, p_val_adj, contrast, celltype
+
+# ── Top genes para heatmap (desde Wilcoxon, no edgeR) ─────────
+top_genes_heatmap <- de_all %>%
+  filter(
+    p_val_adj < 0.05,
+    abs(avg_log2FC) > 0.5,
+    !grepl("^AC[0-9]|^AL[0-9]|^LINC|^MIR|-AS[0-9]", gene)
+  ) %>%
+  group_by(contrast, celltype) %>%
+  slice_max(abs(avg_log2FC), n = 5, with_ties = FALSE) %>%
+  pull(gene) %>%
+  unique()
+
+cat("Genes para heatmap:", length(top_genes_heatmap), "\n")
+
+# Filtrar los que están en el objeto
+top_genes_heatmap <- top_genes_heatmap[top_genes_heatmap %in% rownames(neuro_annotated)]
+cat("Genes disponibles en objeto:", length(top_genes_heatmap), "\n")
+
+
+# ── Heatmap con expresión promedio por condición ──────────────
+# Usar AverageExpression en lugar de pseudobulk edgeR
+
+avg_expr <- AverageExpression(
+  neuro_annotated,
+  features = top_genes_heatmap,
+  group.by = "condition",
+  assay    = "RNA",
+  layer    = "data"   # usa valores normalizados
+)$RNA
+
+# Z-score por gen
+mat_heatmap <- t(scale(t(avg_expr)))
+
+# Ordenar columnas: CTRL → AD → PD
+mat_heatmap <- mat_heatmap[, c("CTRL", "AD", "PD")]
+
+# Anotación de columnas
+col_anno <- HeatmapAnnotation(
+  Condition = c("CTRL", "AD", "PD"),
+  col = list(Condition = c(
+    "CTRL" = "#4CAF7D",
+    "AD"   = "#E05C4B",
+    "PD"   = "#4B7FBE"
+  )),
+  annotation_name_side = "left"
+)
+
+col_fun <- colorRamp2(c(-2, 0, 2), c("#4B7FBE", "white", "#E05C4B"))
+
+ht <- Heatmap(
+  mat_heatmap,
+  name               = "Z-score",
+  col                = col_fun,
+  top_annotation     = col_anno,
+  show_column_names  = TRUE,
+  show_row_names     = TRUE,
+  row_names_gp       = gpar(fontsize = 7, fontface = "italic"),
+  column_names_gp    = gpar(fontsize = 11, fontface = "bold"),
+  cluster_columns    = FALSE,
+  cluster_rows       = TRUE,
+  row_title          = paste0(nrow(mat_heatmap), " genes"),
+  column_title       = "Expresión diferencial · AD / CTRL / PD",
+  column_title_gp    = gpar(fontsize = 12, fontface = "bold"),
+  width              = unit(5, "cm"),
+  height             = unit(0.35 * nrow(mat_heatmap), "cm")
+)
+
+pdf("output/heatmap_DEG.pdf", width = 8, height = max(10, nrow(mat_heatmap) * 0.3))
+draw(ht)
+dev.off()
+draw(ht)   # ver en pantalla
+```
+
+```{r}
+
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 4 · DOTPLOT genes clave por tipo celular  
+# ═══════════════════════════════════════════════════════════════
+
+# Genes relevantes del estriado humano (Xu et al. 2023)
+genes_dotplot <- c(
+  # Astrocytes
+  "AQP4", "GFAP", "SLC1A2",
+  # Oligodendrocytes
+  "MBP", "PLP1", "MOG",
+  # OPC
+  "PDGFRA", "VCAN",
+  # Microglia
+  "CSF1R", "P2RY12", "TMEM119",
+  # Endothelial
+  "PECAM1", "CLDN5",
+  # MSN Neurons
+  "PPP1R1B", "DRD1", "DRD2", "PENK"
+)
+
+# Filtrar los que existen en el objeto
+genes_dotplot <- genes_dotplot[genes_dotplot %in% rownames(alldata)]
+
+# DotPlot split por condición
+DotPlot(
+  alldata,
+  features  = rev(genes_dotplot),
+  group.by  = 'RNA_snn_res.0.25',
+  split.by  = "condition",          # AD / Ctrl / PD
+  cols      = c("#4CAF7D", "#E05C4B", "#4B7FBE"),
+  dot.scale = 7,
+  assay     = "RNA"
+) +
+  coord_flip() +
+  labs(
+    title    = "Marcadores por cluster · split AD / Ctrl / PD",
+    x        = NULL, y = "Cluster"
+  ) +
+  theme_classic(base_size = 10) +
+  theme(
+    axis.text.x     = element_text(angle = 45, hjust = 1),
+    plot.title      = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+ggsave("output/dotplot_condition.pdf", width = 14, height = 9)
+
+```
+
+```{r}
+# ── Verificar que de_all tiene genes significativos ───────────
+de_all %>%
+  filter(p_val_adj < 0.05, abs(avg_log2FC) > 0.5) %>%
+  group_by(contrast, celltype) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  arrange(desc(n))
+
+# ── Top genes desde Wilcoxon (de_all) ────────────────────────
+top_vln <- de_all %>%
+  filter(
+    p_val_adj < 0.05,
+    abs(avg_log2FC) > 0.5,
+    !grepl("^AC[0-9]|^AL[0-9]|^LINC|-AS[0-9]", gene)
+  ) %>%
+  group_by(contrast) %>%
+  slice_max(abs(avg_log2FC), n = 3, with_ties = FALSE) %>%
+  pull(gene) %>%
+  unique()
+
+cat("Genes encontrados:", length(top_vln), "\n")
+print(top_vln)
+
+# Verificar que están en el objeto
+top_vln <- top_vln[top_vln %in% rownames(neuro_annotated)]
+cat("Genes en objeto:", length(top_vln), "\n")
+
+# ── Violin plot ───────────────────────────────────────────────
+sub_vln <- SetIdent(neuro_annotated, value = "condition")
+
+VlnPlot(
+  sub_vln,
+  features = top_vln,
+  ncol     = min(4, length(top_vln)),
+  group.by = "condition",
+  cols     = c("AD" = "#E05C4B", "CTRL" = "#4CAF7D", "PD" = "#4B7FBE"),
+  assay    = "RNA",
+  pt.size  = 0
+) &
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    plot.title  = element_text(size = 10, face = "italic")
+  )
+
+ggsave("output/violin_top_DEGs.pdf", width = 16, height = 10)
+
+
+# ── Versión split por tipo celular (más informativo) ──────────
+# Top 1 gen por tipo celular × contraste AD_vs_Ctrl
+top_per_ct <- de_all %>%
+  filter(
+    p_val_adj < 0.05,
+    avg_log2FC > 0.5,
+    contrast == "AD_vs_Ctrl",
+    !grepl("^AC[0-9]|^AL[0-9]|^LINC|-AS[0-9]", gene),
+    celltype %in% c("Microglia", "Oligodendrocyte", "Astrocyte",
+                    "D1 medium spiny neuron")
+  ) %>%
+  group_by(celltype) %>%
+  slice_max(avg_log2FC, n = 1, with_ties = FALSE) %>%
+  pull(gene)
+
+cat("Top genes por tipo celular:\n")
+print(top_per_ct)
+
+sub_vln2 <- SetIdent(neuro_annotated, value = "celltype_azimuth")
+
+# Subset solo tipos de interés
+neuro_sub <- subset(neuro_annotated,
+  subset = celltype_azimuth %in% 
+    c("Microglia","Oligodendrocyte","Astrocyte","D1 medium spiny neuron")
+)
+
+VlnPlot(
+  neuro_sub,
+  features = top_per_ct[top_per_ct %in% rownames(neuro_sub)],
+  ncol     = 2,
+  group.by = "condition",
+  split.by = "celltype_azimuth",
+  assay    = "RNA",
+  pt.size  = 0
+) &
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    plot.title  = element_text(size = 10, face = "italic")
+  )
+
+ggsave("output/violin_DEGs_by_celltype.pdf", width = 14, height = 10)
+```
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 6 · UMAP split por condición  
+# ═══════════════════════════════════════════════════════════════
+
+# UMAP general con los 3 grupos
+p_split <- DimPlot(
+  alldata,
+  reduction = "umap",
+  split.by  = "condition",
+  group.by  = "RNA_snn_res.0.25",
+  ncol      = 3,
+  pt.size   = 0.3
+) +
+  plot_annotation(
+    title   = "UMAP · AD / Control / PD",
+    theme   = theme(plot.title = element_text(face = "bold", size = 14))
+  )
+
+ggsave("output/umap_split_condition.pdf", p_split, width = 15, height = 5)
+```
+
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  BLOQUE 7 · Composición celular por condición  
+# ═══════════════════════════════════════════════════════════════
+
+meta <- alldata@meta.data %>%
+  mutate(cluster = .data[["RNA_snn_res.0.25"]])
+
+# Proporciones
+prop_df <- meta %>%
+  group_by(condition, cluster) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(condition) %>%
+  mutate(prop = n / sum(n))
+
+ggplot(prop_df, aes(x = condition, y = prop, fill = cluster)) +
+  geom_bar(stat = "identity", position = "stack", color = "white", linewidth = 0.2) +
+  scale_fill_manual(values = colorRampPalette(brewer.pal(9, "Set1"))(n_distinct(prop_df$cluster))) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Composición de clusters por condición",
+    x     = NULL,
+    y     = "Proporción de células",
+    fill  = "Cluster"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title      = element_text(face = "bold"),
+    legend.key.size = unit(0.4, "cm")
+  )
+
+ggsave("output/barplot_composition.pdf", width = 7, height = 5)
+```
+
+```{r}
+# ═══════════════════════════════════════════════════════════════
+#  GO TERMS · Enrichment Analysis (FIXED VERSION)
+#  clusterProfiler + org.Hs.eg.db
+# ═══════════════════════════════════════════════════════════════
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(ggupset)
+library(tidyverse)
+library(patchwork)
+
+# ── 1. UNIVERSO BIOLÓGICO REAL ────────────────────────────────
+universe_genes <- unique(de_all$gene)
+
+universe_entrez <- bitr(
+  universe_genes,
+  fromType = "SYMBOL",
+  toType   = "ENTREZID",
+  OrgDb    = org.Hs.eg.db
+)
+
+cat("Genes en universo:", nrow(universe_entrez), "\n")
+
+# ── 2. FUNCIÓN GO (robusta) ───────────────────────────────────
+run_GO <- function(gene_list, universe, ont = "BP",
+                   p_cut = 0.05, min_genes = 10) {
+  
+  if (length(gene_list) < min_genes) {
+    message("Muy pocos genes (input): ", length(gene_list))
+    return(NULL)
+  }
+  
+  gene_entrez <- bitr(
+    gene_list,
+    fromType = "SYMBOL",
+    toType   = "ENTREZID",
+    OrgDb    = org.Hs.eg.db
+  )
+  
+  cat("  Input:", length(gene_list),
+      "| Mapped:", nrow(gene_entrez), "\n")
+  
+  if (nrow(gene_entrez) < min_genes) {
+    message("Muy pocos genes mapeados")
+    return(NULL)
+  }
+  
+  ego <- enrichGO(
+    gene          = gene_entrez$ENTREZID,
+    universe      = universe$ENTREZID,
+    OrgDb         = org.Hs.eg.db,
+    ont           = ont,
+    pAdjustMethod = "BH",
+    pvalueCutoff  = p_cut,
+    qvalueCutoff  = 0.2,
+    readable      = TRUE
+  )
+  
+  if (is.null(ego) || nrow(ego@result) == 0) return(NULL)
+  
+  ego <- simplify(ego, cutoff = 0.7, by = "p.adjust", select_fun = min)
+  return(ego)
+}
+
+# ── 3. CELL TYPES ─────────────────────────────────────────────
+celltypes_interest <- c(
+  "Microglia",
+  "Oligodendrocyte",
+  "Astrocyte",
+  "D1 medium spiny neuron"
+)
+
+go_results <- list()
+
+# ── 4. LOOP CORREGIDO (UP / DOWN separados de verdad) ─────────
+for (ct in celltypes_interest) {
+  
+  cat("\n── Procesando:", ct, "\n")
+  
+  genes_up <- de_all %>%
+    filter(celltype == ct,
+           contrast == "AD_vs_Ctrl",
+           p_val_adj < 0.05,
+           avg_log2FC > 0.25) %>%
+    pull(gene)
+  
+  genes_down <- de_all %>%
+    filter(celltype == ct,
+           contrast == "AD_vs_Ctrl",
+           p_val_adj < 0.05,
+           avg_log2FC < -0.25) %>%
+    pull(gene)
+  
+  cat("  UP:", length(genes_up),
+      "| DOWN:", length(genes_down), "\n")
+  
+  go_results[[ct]] <- list(
+    up = run_GO(genes_up, universe_entrez),
+    down = run_GO(genes_down, universe_entrez)
+  )
+}
+
+saveRDS(go_results, "output/go_results.rds")
+
+# ── 5. DOTPLOT ────────────────────────────────────────────────
+plot_go_dot <- function(ego, title, color = "#E05C4B", n_terms = 15) {
+  if (is.null(ego)) return(NULL)
+  
+  dotplot(ego, showCategory = n_terms,
+          title = title,
+          color = "p.adjust") +
+    scale_color_gradient(low = color, high = "grey80") +
+    theme(
+      plot.title = element_text(face = "bold", size = 11),
+      axis.text.y = element_text(size = 8)
+    )
+}
+
+for (ct in celltypes_interest) {
+  
+  cat("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+  cat("CELL TYPE:", ct, "\n")
+  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+  
+  ego_up <- go_results[[ct]]$up
+  ego_down <- go_results[[ct]]$down
+  
+  # ── DEBUG: existencia ─────────────────────────────
+  cat("UP object NULL?:", is.null(ego_up), "\n")
+  cat("DOWN object NULL?:", is.null(ego_down), "\n")
+  
+  # ── DEBUG: tamaño de resultados ───────────────────
+  if (!is.null(ego_up)) {
+    cat("UP GO terms:", nrow(ego_up@result), "\n")
+    cat("UP top p.adjust:", ifelse(nrow(ego_up@result) > 0,
+                                   min(ego_up@result$p.adjust, na.rm = TRUE),
+                                   NA), "\n")
+  } else {
+    cat("UP GO: NULL (no enrichment)\n")
+  }
+  
+  if (!is.null(ego_down)) {
+    cat("DOWN GO terms:", nrow(ego_down@result), "\n")
+    cat("DOWN top p.adjust:", ifelse(nrow(ego_down@result) > 0,
+                                     min(ego_down@result$p.adjust, na.rm = TRUE),
+                                     NA), "\n")
+  } else {
+    cat("DOWN GO: NULL (no enrichment)\n")
+  }
+  
+  # ── PLOTS ─────────────────────────────────────────
+  p_up <- plot_go_dot(
+    ego_up,
+    paste(ct, "UP · AD vs CTRL"),
+    "#E05C4B"
+  )
+  
+  p_down <- plot_go_dot(
+    ego_down,
+    paste(ct, "DOWN · AD vs CTRL"),
+    "#4B7FBE"
+  )
+  
+  cat("Plot UP NULL?:", is.null(p_up), "\n")
+  cat("Plot DOWN NULL?:", is.null(p_down), "\n")
+  
+  plots <- Filter(Negate(is.null), list(p_up, p_down))
+  
+  cat("Plots to combine:", length(plots), "\n")
+  
+  if (length(plots) > 0) {
+    
+    combined <- wrap_plots(plots, ncol = 2)
+    
+    file_out <- paste0("output/GO_", gsub(" ", "_", ct), "_AD.pdf")
+    
+    cat("Saving file:", file_out, "\n")
+    
+    ggsave(
+      file_out,
+      combined,
+      width = 16,
+      height = 8
+    )
+    
+    print(combined)
+    
+  } else {
+    cat("No plots generated for", ct, "\n")
+  }
+}
+
+# ── 6. compareCluster (FIXED INPUT CLEANING) ──────────────────
+
+make_cluster <- function(contrast_name) {
+  
+  lst <- lapply(celltypes_interest, function(ct) {
+    
+    genes <- de_all %>%
+      filter(celltype == ct,
+             contrast == contrast_name,
+             p_val_adj < 0.05,
+             avg_log2FC > 0.25) %>%
+      pull(gene)
+    
+    if (length(genes) < 5) return(NULL)
+    
+    bitr(
+      genes,
+      fromType = "SYMBOL",
+      toType   = "ENTREZID",
+      OrgDb    = org.Hs.eg.db
+    )$ENTREZID
+  })
+  
+  names(lst) <- celltypes_interest
+  lst <- Filter(Negate(is.null), lst)
+  
+  lst
+}
+
+gene_list_AD <- make_cluster("AD_vs_Ctrl")
+
+ck_AD <- compareCluster(
+  geneClusters  = gene_list_AD,
+  fun           = "enrichGO",
+  OrgDb         = org.Hs.eg.db,
+  ont           = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  readable      = TRUE
+)
+
+ck_AD <- simplify(ck_AD, cutoff = 0.7)
+
+dotplot(ck_AD, showCategory = 10) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+ggsave("output/GO_compareCluster_AD.pdf", width = 14, height = 10)
+
+# ── 7. MICROGLIA NETWORK ──────────────────────────────────────
+ego_micro <- go_results[["Microglia"]]$up
+
+if (!is.null(ego_micro)) {
+  cnetplot(
+  ego_micro,
+  showCategory = 6
+) +
+  ggtitle("Microglia · GO network (UP)") +
+  theme(plot.title = element_text(face = "bold"))
+  
+  ggsave("output/GO_cnet_microglia.pdf", width = 12, height = 10)
+}
+```
