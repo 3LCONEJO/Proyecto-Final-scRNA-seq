@@ -2,6 +2,8 @@
 ## Human striatal glia differentially contribute to AD- and PD-specific neurodegeneration
 #### Emiliano Ferro, Sofia Gamiño, Irvin Rufino, Jorge Suazo
 
+> Objetos Seurat en ken '/mnt/data/transcriptomica/eferro/SEURAT/CopyOfseurat_objects'
+
 ## Fase 0: Configuración del Entorno
 
 Antes de iniciar el análisis transcriptómico, se establece un entorno computacional robusto mediante la creación de una estructura jerárquica de directorios de salida (QC_results/, seurat_objects/, markers_results/, clustering_results/, DEG_results/) y la carga de librerías especializadas. Este paso es crítico para mantener la trazabilidad del análisis y evitar sobrescrituras accidentales de datos intermedios. Se definen además paletas de colores globales tanto para condiciones patológicas (CTRL, AD, PD) como para tipos celulares que garantizan consistencia visual entre gráficos downstream.
