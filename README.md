@@ -30,7 +30,9 @@ Tras aplicar filtros de calidad, se normaliza la expresión génica mediante un 
 ## Fase 4: Selección de Genes y Reducción Dimensional (PCA)
 
 Se identifican los genes más altamente variables (típicamente 3,000) entre muestras, priorizando característicos de cada tipo celular y condición patológica. Estos genes constituyen las "features de integración" y alimentan un Análisis de Componentes Principales (PCA) que comprime la matriz de expresión de miles de genes a decenas de componentes ortogonales, reteniendo ejes de máxima varianza. Se retienen 30 PCAs para preservar heterogeneidad intra-poblacional sutil (p.ej., subpoblaciones microgliales en transición).
-Fase 5: Integración de Datos entre Lotes (CCA + SCTransform)
+
+## Fase 5: Integración de Datos entre Lotes (CCA + SCTransform)
+
 Dado que las muestras provienen de donadores distintos y procesadas en lotes separados, se implementa integración por Canonical Correlation Analysis (CCA) adaptado a SCTransform. Este algoritmo:
 
 Identifica "anclajes" (pares de células entre lotes con perfiles transcriptómicos similares)
