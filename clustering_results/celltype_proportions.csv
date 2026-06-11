@@ -1,0 +1,25 @@
+"condition","celltype_azimuth","n","prop"
+"CTRL","Astrocyte",1258,0.155673802747185
+"CTRL","Capillary EC",439,0.0543249597822052
+"CTRL","D1 medium spiny neuron",921,0.113971043187724
+"CTRL","D2 medium spiny neuron",1256,0.15542630862517
+"CTRL","Eccentric medium spiny neuron",129,0.0159633708699418
+"CTRL","Memory CD4 T cell",34,0.00420740007424824
+"CTRL","Microglia",557,0.0689271129810667
+"CTRL","Oligodendrocyte",3487,0.431506001732459
+"AD","Astrocyte",1783,0.141845664280032
+"AD","Capillary EC",746,0.0593476531424025
+"AD","D1 medium spiny neuron",1482,0.117899761336516
+"AD","D2 medium spiny neuron",1691,0.134526650755768
+"AD","Eccentric medium spiny neuron",232,0.0184566428003182
+"AD","Memory CD4 T cell",15,0.00119331742243437
+"AD","Microglia",880,0.0700079554494829
+"AD","Oligodendrocyte",5741,0.456722354813047
+"PD","Astrocyte",1529,0.131492948056416
+"PD","Capillary EC",577,0.0496216030271758
+"PD","D1 medium spiny neuron",1513,0.130116959064327
+"PD","D2 medium spiny neuron",1573,0.135276917784658
+"PD","Eccentric medium spiny neuron",233,0.0200378396972824
+"PD","Memory CD4 T cell",35,0.00300997592019264
+"PD","Microglia",613,0.0527175782593739
+"PD","Oligodendrocyte",5555,0.477726178190575
